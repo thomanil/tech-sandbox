@@ -9,7 +9,6 @@ second.
 Launch:
 
 ```
-cd timeline_app
 uv run timeline_app.py
 ```
 
