@@ -19,15 +19,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-
-TICKS_PER_SECOND = 5
-WINDOW_RADIUS = 4  # numbers shown on each side of the current value
+from timeline_model import TICKS_PER_SECOND, WINDOW_RADIUS, TimelineModel
 
 
 class TimelineWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.value = 0
+        self.model = TimelineModel()
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 40, 20, 40)
@@ -35,7 +33,7 @@ class TimelineWidget(QWidget):
         layout.addStretch(1)
 
         self.labels: list[QLabel] = []
-        for i in range(-WINDOW_RADIUS, WINDOW_RADIUS + 1):
+        for _ in range(2 * WINDOW_RADIUS + 1):
             label = QLabel("")
             label.setAlignment(Qt.AlignCenter)
             label.setFixedWidth(70)
@@ -45,25 +43,20 @@ class TimelineWidget(QWidget):
         layout.addStretch(1)
         self.refresh()
 
-    def set_value(self, value: int) -> None:
-        self.value = max(0, value)
-        self.refresh()
-
     def refresh(self) -> None:
-        for offset, label in zip(
-            range(-WINDOW_RADIUS, WINDOW_RADIUS + 1), self.labels
-        ):
-            n = self.value + offset
-            if n < 0:
+        window = self.model.visible_window()
+        for offset, (n, label) in enumerate(zip(window, self.labels)):
+            offset_from_center = offset - WINDOW_RADIUS
+            if n is None:
                 label.setText("")
                 label.setStyleSheet("")
                 continue
             label.setText(str(n))
-            if offset == 0:
+            if offset_from_center == 0:
                 label.setFont(QFont("Helvetica", 36, QFont.Bold))
                 label.setStyleSheet("color: #1f6feb;")
             else:
-                fade = 1.0 - abs(offset) / (WINDOW_RADIUS + 1)
+                fade = 1.0 - abs(offset_from_center) / (WINDOW_RADIUS + 1)
                 gray = int(220 - 140 * fade)
                 label.setFont(QFont("Helvetica", 20))
                 label.setStyleSheet(f"color: rgb({gray}, {gray}, {gray});")
@@ -108,7 +101,8 @@ class MainWindow(QMainWindow):
         return btn
 
     def on_tick(self) -> None:
-        self.timeline.set_value(self.timeline.value + 1)
+        self.timeline.model.step_forward()
+        self.timeline.refresh()
 
     def on_play(self) -> None:
         if not self.timer.isActive():
@@ -118,10 +112,12 @@ class MainWindow(QMainWindow):
         self.timer.stop()
 
     def on_back(self) -> None:
-        self.timeline.set_value(self.timeline.value - 1)
+        self.timeline.model.step_back()
+        self.timeline.refresh()
 
     def on_forward(self) -> None:
-        self.timeline.set_value(self.timeline.value + 1)
+        self.timeline.model.step_forward()
+        self.timeline.refresh()
 
 
 def main() -> int:
