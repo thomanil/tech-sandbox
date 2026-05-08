@@ -1,5 +1,7 @@
 # tech-sandbox
 
+Simple playground and example sandbox for some tech, tools and techniques.
+
 ## timeline_app
 
 Small PySide6 GUI with a centered scrolling number timeline and CD-style
