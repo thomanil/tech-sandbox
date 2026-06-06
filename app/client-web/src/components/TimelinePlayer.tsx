@@ -17,7 +17,6 @@ import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
@@ -54,9 +53,6 @@ export function TimelinePlayer() {
     <Card className="w-full max-w-xl gap-0">
       <CardHeader className="border-b">
         <CardTitle className="text-lg">Timeline</CardTitle>
-        <CardDescription>
-          Thin web client · state lives in <code>timeline_server.py</code>
-        </CardDescription>
         <CardAction className="self-center">
           {connected ? (
             <Badge variant={state?.playing ? 'default' : 'secondary'}>

@@ -17,10 +17,10 @@ export const SAME_ORIGIN_LABEL = 'Same origin (served)'
 // `null` means "derive from window.location" (see resolveServerUrl).
 export const SERVERS: Record<string, string | null> = {
   [SAME_ORIGIN_LABEL]: null,
-  'Local docker': 'ws://127.0.0.1:8000/ws',
+  'Local docker (start-server.sh)': 'ws://127.0.0.1:8000/ws',
   // NodePort on the minikube cluster; the IP is minikube's own (stable on the
   // docker driver). Update it if you recreate the cluster.
-  'Local minikube': 'ws://192.168.49.2:30080/ws',
+  'Local minikube (deploy-minikube.sh)': 'ws://192.168.49.2:30080/ws',
   // TLS-terminated at the UpCloud LB's 443 frontend, so wss:// on the default port.
   'Remote UpCloud': 'wss://lb-0acd94799dc24f208d245ba808d7fdbe-1.upcloudlb.com/ws',
 }
