@@ -128,6 +128,12 @@ class MainWindow(QMainWindow):
         self.resize(720, 240)
 
         self.timeline = TimelineWidget()
+        # Keep the timeline's (stretch-1) slot reserved even when it's hidden on
+        # error, so the banner stays its natural height instead of expanding to
+        # fill the freed space, and the bottom controls stay pinned down.
+        timeline_policy = self.timeline.sizePolicy()
+        timeline_policy.setRetainSizeWhenHidden(True)
+        self.timeline.setSizePolicy(timeline_policy)
 
         # Guards against the combo's currentTextChanged firing when we set it
         # programmatically from a server state message (would echo a bogus
@@ -249,6 +255,7 @@ class MainWindow(QMainWindow):
             f"color: {fg}; background: {bg}; padding: 6px; border-radius: 4px;"
         )
         self.status_label.show()
+        self.timeline.hide()
         for w in self.controls:
             w.setEnabled(False)
         if not self.reconnect_timer.isActive():
@@ -258,6 +265,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Timeline")
         self.reconnect_timer.stop()
         self.status_label.hide()
+        self.timeline.show()
         for w in self.controls:
             w.setEnabled(True)
 
