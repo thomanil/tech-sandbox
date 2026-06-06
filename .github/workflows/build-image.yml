@@ -25,13 +25,13 @@ on:
     # a README/client-only push doesn't need a new server image. (The client is
     # excluded from the image via .dockerignore.)
     paths:
-      - "timeline_server.py"
-      - "timeline_model.py"
+      - "app/server-python/timeline_server.py"
+      - "app/server-python/timeline_model.py"
       - "Dockerfile"
       - ".dockerignore"
       - ".github/workflows/build-image.yml"
       # Web client assets are baked into the image, so changes here need a rebuild.
-      - "static/**"
+      - "app/server-python/static/**"
   # Allow manual runs from the Actions tab (e.g. to republish without a code change).
   workflow_dispatch:
 

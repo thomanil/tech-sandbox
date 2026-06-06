@@ -27,9 +27,9 @@ services:
     # without it the file would land but the old code would keep running.
     develop:
       watch:
-        - path: timeline_server.py
+        - path: app/server-python/timeline_server.py
           action: sync
           target: /app/timeline_server.py
-        - path: timeline_model.py
+        - path: app/server-python/timeline_model.py
           action: sync
           target: /app/timeline_model.py

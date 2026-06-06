@@ -13,4 +13,4 @@ set -euo pipefail
 # Run from the repo root regardless of where the script is invoked from.
 cd "$(dirname "$0")/.."
 
-echo timeline_client.py | entr -r uv run timeline_client.py
+echo app/client-python-qt/timeline_client.py | entr -r uv run app/client-python-qt/timeline_client.py

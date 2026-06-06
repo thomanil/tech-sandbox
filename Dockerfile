@@ -1,5 +1,6 @@
-# State server image. The GUI client (timeline_client.py) is NOT containerized —
-# it runs on the developer's desktop and connects over the published port.
+# State server image. The GUI client (app/client-python-qt/timeline_client.py)
+# is NOT containerized — it runs on the developer's desktop and connects over
+# the published port.
 #
 # Base: Astral's official uv image (Python 3.11 on Debian 12 "bookworm" slim).
 # Pinned to a digest for reproducible builds — the readable tag is kept as
@@ -19,13 +20,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY timeline_model.py timeline_server.py ./
+# The server package is flattened into /app (timeline_server.py imports
+# timeline_model as a sibling module, so they must stay side by side).
+COPY app/server-python/timeline_model.py app/server-python/timeline_server.py ./
 
 # Web client assets. STUB: copies the placeholder static/ page so the server can
 # serve it at / alongside /ws. When a local Vite build exists, replace this with a
 # multi-stage build — a node stage that runs `vite build`, then
-# `COPY --from=build /web/dist ./static` here (see static/index.html + README).
-COPY static ./static
+# `COPY --from=build /web/dist ./static` here (see app/server-python/static/index.html + README).
+COPY app/server-python/static ./static
 
 # Keep the PEP 723 inline metadata in timeline_server.py as the single source of
 # truth for dependencies: resolve them with uv and install system-wide at build

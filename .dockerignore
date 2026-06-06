@@ -3,5 +3,5 @@ __pycache__/
 *.pyc
 .venv/
 # Client + docs aren't needed in the server image.
-timeline_client.py
+app/client-python-qt/
 README.md

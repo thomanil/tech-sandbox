@@ -57,12 +57,13 @@ workflow stays the same as it evolves (e.g. when the client becomes web-based).
 Both also live-reload on source edits. What they run today:
 
 - **`start-server.sh`** → `docker compose watch`. The server runs containerized
-  (FastAPI/uvicorn); on a save to `timeline_server.py` or `timeline_model.py`,
+  (FastAPI/uvicorn); on a save to `app/server-python/timeline_server.py` or
+  `app/server-python/timeline_model.py`,
   Compose syncs the file into the running container and uvicorn's `--reload`
   watcher hot-reloads in place — no image rebuild, no container restart. Compose
   is a local dev convenience only; the image's prod `CMD` runs plain `python`
   with no reloader.
-- **`start-client.sh`** → `entr -r uv run timeline_client.py`. The client is a
+- **`start-client.sh`** → `entr -r uv run app/client-python-qt/timeline_client.py`. The client is a
   self-contained renderer (it imports nothing from the model or server), so only
   its own file is watched — server/model edits don't relaunch the GUI.
 
@@ -155,7 +156,7 @@ future Kubernetes liveness/readiness probe will use.
 The Qt client stays a thin renderer, but now selects its backend via the
 **Server** dropdown (`Local` today; `Staging`/`Production` stubbed), so one
 client binary can target different environments. Running the server the old way
-(`uv run timeline_server.py`) still works for quick local dev — the container is
+(`uv run app/server-python/timeline_server.py`) still works for quick local dev — the container is
 the deployment-shaped path toward k8s.
 
 ```mermaid
@@ -225,7 +226,7 @@ rollout (so a rebuilt `:latest` is actually picked up — `kubectl apply` alone
 won't restart pods when the manifest text is unchanged), waits for readiness,
 and prints the `ws://<minikube-ip>:30080/ws` URL. Select **Local minikube** in
 the client's Server dropdown to connect. If the IP ever changes (e.g. after
-`minikube delete`), update the one `Local minikube` line in `timeline_client.py`
+`minikube delete`), update the one `Local minikube` line in `app/client-python-qt/timeline_client.py`
 to whatever the script prints.
 
 Follow the logs (the k8s counterpart of `docker compose logs -f` — the server
