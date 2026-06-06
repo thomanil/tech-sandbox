@@ -22,6 +22,16 @@ export function TimelineWindow({ window }: { window: (number | null)[] }) {
         // (~0.9 nearest → ~0.1 at the edge), and the font shrinks from ~1.4rem
         // down to ~0.8rem. Opacity-toward-background stays correct in dark mode,
         // where the Qt client's literal grey ramp would brighten instead of fade.
+        const baseRem = isCenter ? 2.25 : 1.4 - 0.6 * dist
+        // Then fit the value to the cell, like the Qt client's _fitted_font:
+        // long numbers shrink instead of overflowing, so the row keeps a stable
+        // width. Monospace digits advance ~0.6em; CELL_REM is the usable width
+        // inside one cell (~64px of the 68px cell). Short numbers stay at base.
+        const text = n === null ? '' : String(n)
+        const CELL_REM = 4
+        const fontRem = text
+          ? Math.min(baseRem, CELL_REM / (text.length * 0.6))
+          : baseRem
         return (
           <div
             key={i}
@@ -32,14 +42,13 @@ export function TimelineWindow({ window }: { window: (number | null)[] }) {
                 className={cn(
                   'transition-all duration-150',
                   isCenter
-                    ? 'text-4xl font-bold text-blue-600 dark:text-blue-400'
+                    ? 'font-bold text-blue-600 dark:text-blue-400'
                     : 'text-muted-foreground',
                 )}
-                style={
-                  isCenter
-                    ? undefined
-                    : { opacity: 1 - 0.85 * dist, fontSize: `${1.4 - 0.6 * dist}rem` }
-                }
+                style={{
+                  fontSize: `${fontRem}rem`,
+                  ...(isCenter ? {} : { opacity: 1 - 0.85 * dist }),
+                }}
               >
                 {n}
               </span>
