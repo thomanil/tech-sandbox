@@ -73,7 +73,12 @@ export function useTimelineSocket(serverLabel: string) {
         })
       }
       ws.onclose = () => {
-        wsRef.current = null
+        // Only retract the shared ref if it still points at THIS socket. On a
+        // server switch the previous socket's onclose fires *after* the new
+        // socket is already installed; nulling unconditionally would wipe the
+        // new socket's ref, leaving send() with nothing to write to — live
+        // connection, dead controls, and no error banner.
+        if (wsRef.current === ws) wsRef.current = null
         if (disposed) return
         setStatus({
           kind: 'offline',
