@@ -225,6 +225,17 @@ the client's Server dropdown to connect. If the IP ever changes (e.g. after
 `minikube delete`), update the one `Local minikube` line in `timeline_client.py`
 to whatever the script prints.
 
+Follow the logs (the k8s counterpart of `docker compose logs -f` — the server
+streams client events and the full roster to stdout):
+
+```
+./scripts/logs-minikube.sh
+```
+
+A follow is bound to one pod, so a redeploy (which rolls the pod) ends the
+stream — just run it again once the new pod is ready. To inspect the last
+terminated pod instead: `kubectl logs deployment/timeline-server --previous`.
+
 Teardown:
 
 ```
