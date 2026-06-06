@@ -32,7 +32,7 @@ fi
 
 # --- Ensure the cluster is running -----------------------------------------
 if ! minikube status >/dev/null 2>&1; then
-  echo "Starting minikube..."
+  echo "Starting minikube.."
   minikube start
 fi
 
