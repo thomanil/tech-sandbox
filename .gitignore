@@ -1,2 +1,3 @@
 /.idea/
 /__pycache__/
+/app/client-python-qt/__pycache__/
