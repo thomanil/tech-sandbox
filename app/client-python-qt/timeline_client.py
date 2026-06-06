@@ -43,7 +43,10 @@ SERVERS = {
     # minikube's own; it's stable on the docker driver but if you recreate the
     # cluster, update this to whatever scripts/deploy-minikube.sh prints.
     "Local minikube": "ws://192.168.49.2:30080/ws",
-    "Remote UpCloud": "ws://lb-0acd94799dc24f208d245ba808d7fdbe-1.upcloudlb.com/ws",
+    # TLS-terminated at the UpCloud load balancer's 443 frontend (http mode,
+    # auto-provisioned cert), so this is wss:// on the default 443 port — no
+    # port in the URL. The plain-http :80 frontend still exists for healthz.
+    "Remote UpCloud": "wss://lb-0acd94799dc24f208d245ba808d7fdbe-1.upcloudlb.com/ws",
 }
 DEFAULT_SERVER = "Local docker"
 
