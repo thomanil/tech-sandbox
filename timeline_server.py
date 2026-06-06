@@ -93,6 +93,44 @@ def state_message(state: ClientState) -> dict:
     }
 
 
+def roster_table(acting_id: int | None = None) -> str:
+    """An aligned, human-readable table of every currently connected client and
+    its state: sequence picked, place in the timeline (index + value there), and
+    play/pause. Disconnected-but-remembered seeds are excluded -- this is the
+    live roster, not the state table. The client that triggered the current
+    event (if any) is flagged with an arrow."""
+    ids = sorted(manager.conns)
+    if not ids:
+        return "    (no clients connected)"
+    headers = ("", "CLIENT", "SEQUENCE", "INDEX", "VALUE", "STATE")
+    rows = [headers]
+    for cid in ids:
+        m = states[cid].model
+        value = m.value_at(m.index)
+        rows.append(
+            (
+                "->" if cid == acting_id else "",
+                str(cid),
+                m.sequence_name,
+                str(m.index),
+                "-" if value is None else str(value),
+                "playing" if states[cid].playing else "paused",
+            )
+        )
+    widths = [max(len(row[i]) for row in rows) for i in range(len(headers))]
+    fmt = lambda row: "    " + "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row))
+    rule = "    " + "-" * (sum(widths) + 2 * (len(widths) - 1))
+    return "\n".join([fmt(headers), rule, *(fmt(row) for row in rows[1:])])
+
+
+def log_event(action: str, client_id: int) -> None:
+    """The single logging entry point for every interesting event. Emits the
+    triggering client + action, then dumps the full live roster so the console
+    always shows the complete picture after any operation (connect, disconnect,
+    play, stop, forward, back, set_sequence)."""
+    logger.info("client %s: %s\n\n%s\n", client_id, action, roster_table(client_id))
+
+
 # --- connection tracking ----------------------------------------------------
 
 
@@ -173,26 +211,23 @@ async def handle_command(client_id: int, msg: dict) -> None:
     m = state.model
     if action == "forward":
         m.step_forward()
-        logger.info("client %s forward -> %s index %d", client_id, m.sequence_name, m.index)
     elif action == "back":
         m.step_back()
-        logger.info("client %s back -> %s index %d", client_id, m.sequence_name, m.index)
     elif action == "play":
         state.playing = True
-        logger.info("client %s play (%s @ index %d)", client_id, m.sequence_name, m.index)
     elif action == "stop":
         state.playing = False
-        logger.info("client %s stop (%s @ index %d)", client_id, m.sequence_name, m.index)
     elif action == "set_sequence":
         name = msg.get("name")
         if name not in SEQUENCES:
             logger.warning("client %s set_sequence rejected: %r", client_id, name)
             return
         m.set_sequence(name)
-        logger.info("client %s set_sequence -> %s", client_id, name)
+        action = f"set_sequence {name}"
     else:
         logger.warning("client %s unknown action: %r", client_id, action)
         return  # unknown action -> no state change, no send
+    log_event(action, client_id)
     await manager.send_to_client(client_id, state_message(state))
 
 
@@ -215,17 +250,11 @@ async def ws_endpoint(ws: WebSocket) -> None:
     # Resuming an existing seed vs. a brand-new one changes the connect message.
     known = client_id in states
     await manager.connect(ws, client_id)
-    logger.info(
-        "client %s %s -- %d connected %s, %d known",
-        client_id,
-        "reconnected" if known else "connected",
-        len(manager.conns),
-        sorted(manager.conns),
-        len(states),
-    )
+    state = get_state(client_id)  # born here so it shows in the roster below
+    log_event("reconnected" if known else "connected", client_id)
     try:
         # Initial full state for this client (resumes prior state if seed is known).
-        await ws.send_json(state_message(get_state(client_id)))
+        await ws.send_json(state_message(state))
         while True:
             msg = await ws.receive_json()
             await handle_command(client_id, msg)
@@ -235,12 +264,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
         pass
     finally:
         manager.disconnect(ws, client_id)
-        logger.info(
-            "client %s disconnected -- %d connected %s",
-            client_id,
-            len(manager.conns),
-            sorted(manager.conns),
-        )
+        log_event("disconnected", client_id)
 
 
 if __name__ == "__main__":
