@@ -2,6 +2,19 @@
 
 Simple playground and example sandbox for some tech, tools and techniques.
 
+## Requisite tools
+
+Not every tool is needed for every workflow — see the "needed for" column.
+
+| Tool | What for | Needed for |
+| --- | --- | --- |
+| [Python](https://www.python.org/) 3.11+ | Runs the client and server | everything |
+| [uv](https://docs.astral.sh/uv/) | Resolves the PEP 723 inline deps and runs the scripts (no manual `pip install`) | running client/server locally |
+| [entr](https://eradman.com/entrproject/) | Restarts the GUI client on source edits (`start-client.sh`) | the client live-reload script |
+| [Docker](https://docs.docker.com/get-docker/) | Builds/runs the server container; also minikube's default driver | compose dev **and** minikube |
+| [minikube](https://minikube.sigs.k8s.io/docs/start/) | Local single-node Kubernetes cluster | local k8s deploy |
+| [kubectl](https://kubernetes.io/docs/tasks/tools/) | Applies manifests and drives the cluster | local k8s deploy |
+
 ## Current incarnation
 
 A small PySide6 GUI showing a centered scrolling number timeline with CD-style
@@ -167,14 +180,88 @@ flowchart TB
   qt -->|draws window| display
 ```
 
+### (Now) Local kubernetes deployment via minikube
+
+The same container is now the unit of a real Kubernetes deployment, run locally
+on [minikube](https://minikube.sigs.k8s.io/) so manifests can be iterated on
+quickly. `k8s/timeline-server-local.yaml` holds a `Deployment` running the
+`timeline-server` image and a `Service` fronting port 8000, with liveness /
+readiness probes wired to `GET /healthz` — the same endpoint the compose
+healthcheck uses.
+
+The `Deployment` is a **single replica** with a `Recreate` strategy: state is
+in-memory and per-process (one ticker drives all clients), so it must never
+scale past 1 — a second pod would keep its own independent state. Horizontal
+scaling would need shared state first.
+
+The desktop client is **not** containerized; it connects from the host to the
+in-cluster server through a **NodePort** (fixed port `30080`). On the docker
+driver the minikube IP is stable and routable from a Linux host, so the client
+reaches it at `ws://<minikube-ip>:30080/ws`. WebSockets need no special config
+over NodePort — it's raw TCP passthrough, so the HTTP `Upgrade` handshake passes
+straight through (unlike an Ingress, which would have to be told to allow it).
+
+**Prerequisites:** `minikube` and `kubectl` (the deploy script checks for both
+and points you at their install pages if missing). Docker is the default driver.
+
+Deploy (one command):
+
+```
+./scripts/deploy-minikube.sh
+```
+
+It starts the cluster if needed, builds the image straight into minikube
+(`minikube image build` — no registry/push), applies the manifests, forces a
+rollout (so a rebuilt `:latest` is actually picked up — `kubectl apply` alone
+won't restart pods when the manifest text is unchanged), waits for readiness,
+and prints the `ws://<minikube-ip>:30080/ws` URL. Select **Local minikube** in
+the client's Server dropdown to connect. If the IP ever changes (e.g. after
+`minikube delete`), update the one `Local minikube` line in `timeline_client.py`
+to whatever the script prints.
+
+Teardown:
+
+```
+kubectl delete -f k8s/timeline-server-local.yaml   # remove the app, keep the cluster
+minikube stop                                # stop the cluster, keep its state
+minikube delete                              # nuke the cluster entirely
+```
+
+```mermaid
+flowchart TB
+  subgraph clientdev["💻 Developer Workstation &laquo;device&raquo;"]
+    subgraph uvclient["uv ephemeral venv &laquo;execution environment&raquo;"]
+      client["timeline_client.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>+ Server env dropdown: Local docker / Local minikube<br/>&laquo;artifact&raquo;"]
+      qt["PySide6 / Qt runtime<br/>&laquo;artifact&raquo;"]
+    end
+    display["X11 / Wayland display<br/>&laquo;device&raquo;"]
+  end
+
+  subgraph minikube["☸️ minikube cluster (docker driver) &laquo;device&raquo;"]
+    subgraph svc["Service timeline-server (NodePort 30080 → 8000) &laquo;artifact&raquo;"]
+      subgraph deploy["Deployment timeline-server (replicas: 1, Recreate) &laquo;artifact&raquo;"]
+        subgraph pod["Pod (runAsUser 10001) &laquo;container&raquo;"]
+          server["timeline_server.py<br/>(FastAPI + uvicorn: owns state + asyncio ticker)<br/>&laquo;artifact&raquo;"]
+          model["timeline_model.py<br/>(domain model)<br/>&laquo;artifact&raquo;"]
+          health["GET /healthz<br/>(liveness/readiness probe)<br/>&laquo;artifact&raquo;"]
+        end
+      end
+    end
+  end
+
+  client <-->|"&laquo;WebSocket&raquo; ws://&lt;minikube-ip&gt;:30080/ws<br/>state push / command send"| svc
+  svc -->|routes to| pod
+  pod -.->|kubelet probes| health
+  health -.->|routes to| server
+  server -->|imports| model
+  client -->|renders via| qt
+  qt -->|draws window| display
+```
+
 ### (Next) Remote kubernetes deployments of server
 
-Not built yet. The container is the unit of deployment: a `Deployment` running
-the `timeline-server` image, a `Service` fronting port 8000, and liveness /
-readiness probes wired to `GET /healthz`. Multi-client sync already holds across
-WebSocket connections, so a single replica is the natural starting point (the
-in-memory state is per-process, so horizontal scaling would need shared state
-first). 
-
-Make it run locally in minkube so we can test manifests etc quickly. Once that works, run remote instances
-in both github (free?) and Upcloud (paid use)
+Not built yet. Once the local minikube path is solid, run remote instances in
+both GitHub (free?) and UpCloud (paid use). The manifests in `k8s/` are the
+starting point; remote clusters will add an Ingress + TLS and real hostnames
+(the stubbed `Remote Github` / `Remote UpCloud` entries in the client's
+`SERVERS` dict are placeholders for those).

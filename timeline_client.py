@@ -34,14 +34,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# Server environments the client can connect to. Only Local is wired up for
-# now; uncomment/add Staging and Production here when those backends exist.
+# Server environments the client can connect to. Local docker (compose) and
+# Local minikube (NodePort) are wired up; uncomment/add the remote backends
+# here when those exist.
 SERVERS = {
-    "Local": "ws://127.0.0.1:8000/ws",
-    # "Staging": "ws://staging.internal:8000/ws",
-    # "Production": "wss://timeline.example.com/ws",
+    "Local docker": "ws://127.0.0.1:8000/ws",
+    # NodePort on the minikube cluster (see k8s/timeline-server.yaml). The IP is
+    # minikube's own; it's stable on the docker driver but if you recreate the
+    # cluster, update this to whatever scripts/deploy-minikube.sh prints.
+    "Local minikube": "ws://192.168.49.2:30080/ws",
+    # "Remote Github": "ws://staging.internal:8000/ws",
+    # "Remote UpCloud": "wss://timeline.example.com/ws",
 }
-DEFAULT_SERVER = "Local"
+DEFAULT_SERVER = "Local docker"
 
 
 class TimelineWidget(QWidget):
