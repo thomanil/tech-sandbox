@@ -19,4 +19,11 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // Vendored shadcn/ui components: they export style variants (buttonVariants,
+    // badgeVariants) alongside the component, which trips the fast-refresh
+    // single-export rule. They're generated, not hand-edited, so exempt them.
+    files: ['src/components/ui/**'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 ])

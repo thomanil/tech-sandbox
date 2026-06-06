@@ -427,9 +427,19 @@ flowchart TB
 ```
 ### (Next iteration) Vite+React+TypeScript web client, served by the same node
 
-A second client lives in `app/client-web` (Vite + React + TypeScript). It is
-served by the **same** server process — and so the same minikube/UpCloud node and
-k8s Service — that owns `/ws`, with no second service and no CORS:
+A second client lives in `app/client-web` (Vite + React + TypeScript, UI built
+with [shadcn/ui](https://ui.shadcn.com) + Tailwind v4). It mirrors the Qt client
+feature-for-feature — the scrolling timeline window (center value accented,
+neighbours fading with distance), the Sequence picker, and the ⏮/▶/■/⏭ transport
+— as a thin renderer over one WebSocket (`useTimelineSocket`):
+it holds no state, draws whatever window the server pushes, auto-reconnects while
+the server is down, and disables the controls behind a status banner when
+offline. It is served by the **same** server process — and so the same
+minikube/UpCloud node and k8s Service — that owns `/ws`, with no second service
+and no CORS. (The Qt client's Server-environment dropdown is shown only in local
+dev, where the Vite dev server is a separate origin; in the shipped build the
+backend is fixed to the serving origin, so the picker is hidden — gated on
+`import.meta.env.DEV`.):
 
 - **Local dev** runs the two halves as separate hot-reloading processes:
   `start-server.sh` (backend on `:8000`) and `start-web-client.sh` (Vite dev
