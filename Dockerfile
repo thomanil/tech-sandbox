@@ -1,4 +1,4 @@
-# State server image. The GUI client (timeline_app.py) is NOT containerized —
+# State server image. The GUI client (timeline_client.py) is NOT containerized —
 # it runs on the developer's desktop and connects over the published port.
 #
 # Base: Astral's official uv image (Python 3.11 on Debian 12 "bookworm" slim).

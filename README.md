@@ -12,7 +12,7 @@ and each remembers its own position.
 State now lives in a separate **server** process: a FastAPI/uvicorn app
 (`timeline_server.py`) owns the timeline (per-sequence positions, the active
 sequence, and the play/pause flag) and runs the playback clock. The GUI
-(`timeline_app.py`) is a thin client that streams commands and state over one
+(`timeline_client.py`) is a thin client that streams commands and state over one
 WebSocket — so multiple GUI clients stay in sync. The client has a **Server**
 dropdown beside the sequence picker for choosing which backend to connect to
 (only `Local` is wired up for now; Staging/Production are stubbed in `SERVERS`).
@@ -21,7 +21,7 @@ Launch — start the server first, then one or more clients (two terminals):
 
 ```
 uv run timeline_server.py    # state server on 127.0.0.1:8000
-uv run timeline_app.py       # GUI client (run again for a second window)
+uv run timeline_client.py       # GUI client (run again for a second window)
 ```
 
 The server is also containerized. To run it in Docker instead of `uv` (the
@@ -45,8 +45,12 @@ probe for the compose healthcheck and future k8s deployment.
 Launch the client with filewatch/"live reload" once code changes:
 
 ```
-ls *.py | entr -r uv run timeline_app.py
+echo timeline_client.py | entr -r uv run timeline_client.py
 ```
+
+The client is a self-contained renderer (it imports nothing from the model or
+server), so only its own file should trigger a restart — feeding `entr` just
+`timeline_client.py` avoids needlessly relaunching the GUI on server/model edits.
 
 Dependencies are declared inline in each script (PEP 723), so `uv` installs
 them into an ephemeral env on first run — no separate `pip install` step
@@ -59,7 +63,7 @@ Showing the evolution of the architecture in this repo. Each incarnation has its
 ### (Previous) Python script + QT, all local
 
 A single computer runs this monolithic Python + Qt module. The two source
-modules (`timeline_app.py` entrypoint and `timeline_model.py` domain model)
+modules (`timeline_client.py` entrypoint and `timeline_model.py` domain model)
 are installed by `uv` into an ephemeral virtual env alongside the PySide6/Qt
 runtime, and drawn to the local display.
 
@@ -67,7 +71,7 @@ runtime, and drawn to the local display.
 flowchart TB
   subgraph dev["💻 Developer Workstation &laquo;device&raquo;"]
     subgraph uv["uv ephemeral venv &laquo;execution environment&raquo;"]
-      app["timeline_app.py<br/>(PySide6 GUI: timeline + transport controls)<br/>&laquo;artifact&raquo;"]
+      app["timeline_client.py<br/>(PySide6 GUI: timeline + transport controls)<br/>&laquo;artifact&raquo;"]
       model["timeline_model.py<br/>(domain model)<br/>&laquo;artifact&raquo;"]
       qt["PySide6 / Qt runtime<br/>&laquo;artifact&raquo;"]
     end
@@ -85,7 +89,7 @@ State moves out of the GUI into a separate server process. A FastAPI/uvicorn
 app (`timeline_server.py`) owns the timeline model (per-sequence positions, the
 active sequence, the play/pause flag) and runs the tick loop as an asyncio
 task, broadcasting state to every connected client over a WebSocket. The
-PySide6 client (`timeline_app.py`) is a thin renderer: it sends command
+PySide6 client (`timeline_client.py`) is a thin renderer: it sends command
 messages (forward / back / play / stop / set_sequence) and redraws whatever
 window the server pushes back. The two run as separate processes, so multiple
 clients stay in sync.
@@ -94,7 +98,7 @@ clients stay in sync.
 flowchart TB
   subgraph clientdev["💻 Developer Workstation &laquo;device&raquo;"]
     subgraph uvclient["uv ephemeral venv &laquo;execution environment&raquo;"]
-      client["timeline_app.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>&laquo;artifact&raquo;"]
+      client["timeline_client.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>&laquo;artifact&raquo;"]
       qt["PySide6 / Qt runtime<br/>&laquo;artifact&raquo;"]
     end
     display["X11 / Wayland display<br/>&laquo;device&raquo;"]
@@ -137,7 +141,7 @@ the deployment-shaped path toward k8s.
 flowchart TB
   subgraph clientdev["💻 Developer Workstation &laquo;device&raquo;"]
     subgraph uvclient["uv ephemeral venv &laquo;execution environment&raquo;"]
-      client["timeline_app.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>+ Server env dropdown: Local / Staging / Prod<br/>&laquo;artifact&raquo;"]
+      client["timeline_client.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>+ Server env dropdown: Local / Staging / Prod<br/>&laquo;artifact&raquo;"]
       qt["PySide6 / Qt runtime<br/>&laquo;artifact&raquo;"]
     end
     display["X11 / Wayland display<br/>&laquo;device&raquo;"]
