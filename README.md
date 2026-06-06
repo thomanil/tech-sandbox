@@ -24,7 +24,25 @@ needed.
 One uml deployment diagram per tagged version of this repo, 
 showing how the app is deployed/distributed/run, and which moving parts exist
 
-v1:
+### v1: Python script + QT, all local
 
-TODO add uml deployment diagram that is renderable in README locally and on github
-It should show a single computer, running this monolithic python + qt module 
+A single computer runs this monolithic Python + Qt module. The two source
+modules (`timeline_app.py` entrypoint and `timeline_model.py` domain model)
+are installed by `uv` into an ephemeral virtual env alongside the PySide6/Qt
+runtime, and drawn to the local display.
+
+```mermaid
+flowchart TB
+  subgraph dev["💻 Developer Workstation &laquo;device&raquo;"]
+    subgraph uv["uv ephemeral venv &laquo;execution environment&raquo;"]
+      app["timeline_app.py<br/>(PySide6 GUI: timeline + transport controls)<br/>&laquo;artifact&raquo;"]
+      model["timeline_model.py<br/>(domain model)<br/>&laquo;artifact&raquo;"]
+      qt["PySide6 / Qt runtime<br/>&laquo;artifact&raquo;"]
+    end
+    display["X11 / Wayland display<br/>&laquo;device&raquo;"]
+  end
+
+  app -->|imports| model
+  app -->|renders via| qt
+  qt -->|draws window| display
+``` 
