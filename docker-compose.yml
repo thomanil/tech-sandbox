@@ -7,6 +7,11 @@ services:
     environment:
       HOST: "0.0.0.0"
       PORT: "8000"
+    # Dev-only override: run uvicorn with --reload so the files synced in by
+    # `watch` (below) trigger an in-process hot reload. The Dockerfile's prod
+    # CMD (plain `python timeline_server.py`) is left untouched — this reloader
+    # never ships, since compose is only used locally during dev.
+    command: ["uvicorn", "timeline_server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
       interval: 10s
@@ -15,13 +20,16 @@ services:
       start_period: 5s
     restart: unless-stopped
     # Live reload for dev, the server-side analog of the client's `entr -r`:
-    # run `docker compose watch`, and on a save to either source file Compose
-    # rebuilds the image and relaunches the container. `rebuild` keeps the
-    # baked-in/immutable image semantics (vs. syncing live code into a running
-    # container), so what you test is what ships.
+    # run `docker compose watch`, and on a save Compose copies the file into the
+    # running container. No rebuild and no container restart — uvicorn's own
+    # --reload watcher (see the command: override above) sees the new file and
+    # hot-reloads the app in place. Pure `sync` works *because* of that watcher;
+    # without it the file would land but the old code would keep running.
     develop:
       watch:
         - path: timeline_server.py
-          action: rebuild
+          action: sync
+          target: /app/timeline_server.py
         - path: timeline_model.py
-          action: rebuild
+          action: sync
+          target: /app/timeline_model.py

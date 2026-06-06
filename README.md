@@ -29,12 +29,14 @@ client still runs locally and connects on `localhost:8000`):
 
 ```
 docker compose up --build    # state server on 127.0.0.1:8000
-docker compose watch         # same, but rebuild + relaunch on a source save
+docker compose watch         # same, but hot-reload on a source save
 ```
 
 `docker compose watch` is the server-side analog of the client's `entr -r`
-below: edit `timeline_server.py` or `timeline_model.py` and Compose rebuilds the
-image and relaunches the container automatically.
+below: edit `timeline_server.py` or `timeline_model.py` and Compose syncs the
+file into the container, where uvicorn's `--reload` watcher hot-reloads the app
+in place — no image rebuild, no container restart. Compose is a local dev
+convenience only; the image's prod `CMD` runs plain `python` with no reloader.
 
 The bind address comes from the `HOST`/`PORT` env vars (default `127.0.0.1:8000`
 for local dev; the container sets `HOST=0.0.0.0`). `GET /healthz` is a liveness
