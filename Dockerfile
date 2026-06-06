@@ -1,6 +1,27 @@
-# State server image. The GUI client (app/client-python-qt/timeline_client.py)
+# State server image. The Qt GUI client (app/client-python-qt/timeline_client.py)
 # is NOT containerized — it runs on the developer's desktop and connects over
-# the published port.
+# the published port. The WEB client (app/client-web), by contrast, IS baked in:
+# the first stage below builds it to static assets that the server stage serves
+# at / alongside /ws (same process, port, and origin).
+#
+# --- web client build stage -------------------------------------------------
+#
+# Build the Vite/React/TS web client to plain static files. A pinned Node image
+# runs `npm ci` + `vite build`, emitting /web/dist (index.html + favicon/icons +
+# hashed files under assets/). Only that dist/ is copied into the final image —
+# Node and node_modules never ship. Pinned to a digest for reproducible builds
+# (the tag is kept as documentation); this is the multi-arch index digest, so
+# arm64/amd64 both resolve. Resolved 2026-06-06 from tag 22-bookworm-slim.
+FROM node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732 AS web-build
+WORKDIR /web
+# Copy only the manifests first so `npm ci` is cached and re-runs only when the
+# lockfile changes, not on every source edit.
+COPY app/client-web/package.json app/client-web/package-lock.json ./
+RUN npm ci
+COPY app/client-web/ ./
+RUN npm run build
+
+# --- server stage -----------------------------------------------------------
 #
 # Base: Astral's official uv image (Python 3.11 on Debian 12 "bookworm" slim).
 # Pinned to a digest for reproducible builds — the readable tag is kept as
@@ -24,11 +45,10 @@ RUN apt-get update \
 # timeline_model as a sibling module, so they must stay side by side).
 COPY app/server-python/timeline_model.py app/server-python/timeline_server.py ./
 
-# Web client assets. STUB: copies the placeholder static/ page so the server can
-# serve it at / alongside /ws. When a local Vite build exists, replace this with a
-# multi-stage build — a node stage that runs `vite build`, then
-# `COPY --from=build /web/dist ./static` here (see app/server-python/static/index.html + README).
-COPY app/server-python/static ./static
+# Web client assets: the Vite build output from the web-build stage above,
+# dropped where timeline_server.py mounts it (static/). Content-hashed filenames,
+# so it's safe to cache hard.
+COPY --from=web-build /web/dist ./static
 
 # Keep the PEP 723 inline metadata in timeline_server.py as the single source of
 # truth for dependencies: resolve them with uv and install system-wide at build

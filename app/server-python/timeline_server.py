@@ -12,8 +12,9 @@ Single source of truth: this process owns the timeline state in memory
 (per-sequence indices, the active sequence, and the play/pause flag) and runs
 the playback ticker. The GUI client is a thin renderer that streams commands in
 and state out over one WebSocket. GET /healthz is a liveness/readiness probe for
-container orchestration (Docker/k8s), and (when present) the static/ dir is served
-at / as the web client — same app, port, and origin as /ws.
+container orchestration (Docker/k8s), and (when present) the static/ dir — the
+Vite build of the web client (app/client-web) — is served at / as the web client,
+same app, port, and origin as /ws.
 
 Bind host/port come from the HOST/PORT env vars (default 127.0.0.1:8000) so the
 container can publish on 0.0.0.0 without code changes; see Dockerfile.
@@ -32,6 +33,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import Scope
 
 from timeline_model import SEQUENCES, TICKS_PER_SECOND, TimelineModel
 
@@ -275,17 +278,34 @@ async def ws_endpoint(ws: WebSocket) -> None:
 # Serve the web client from this same app/port/origin as /ws, so the single node
 # (and single k8s Service) serves both — no second service, no CORS.
 #
-# STUB: today static/ holds only a placeholder page (see static/index.html). The
-# mount is guarded on the dir existing so the WS-only paths (uv run, compose dev)
-# still boot if it's absent. It's registered AFTER /ws and /healthz because a
-# mount at "/" is greedy and would otherwise shadow them.
+# static/ is the Vite build output (index.html + favicon/icons + hashed files
+# under assets/), baked into the image by the Dockerfile's web-build stage. The
+# mount is guarded on the dir existing so the WS-only paths still boot without it
+# — i.e. `uv run timeline_server.py` for quick backend dev (the web client is run
+# separately with hot reload via scripts/start-web-client.sh). It's registered
+# AFTER /ws and /healthz because a mount at "/" is greedy and would shadow them.
+
+
+class SPAStaticFiles(StaticFiles):
+    """StaticFiles that falls back to index.html on a 404, so client-side routes
+    (and a hard refresh / deep link onto one) resolve to the SPA shell instead of
+    404ing. Requests for real files — hashed assets, favicon — still hit those
+    first. A missing file UNDER assets/ keeps its real 404 (a bad hashed-asset URL
+    should fail loudly, not return the HTML shell with the wrong content type);
+    only other missing paths, i.e. navigation routes, fall through to the shell."""
+
+    async def get_response(self, path: str, scope: Scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and not path.startswith("assets/"):
+                return await super().get_response("index.html", scope)
+            raise
+
+
 STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.is_dir():
-    # TODO(vite): once a local `vite build` emits hashed assets, also mount them:
-    #   app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
-    # and add an SPA deep-link fallback (a catch-all GET returning index.html)
-    # declared BELOW /ws and /healthz so those keep priority.
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+    app.mount("/", SPAStaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 
 if __name__ == "__main__":

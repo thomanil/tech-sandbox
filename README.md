@@ -49,12 +49,13 @@ Launch — start the server first, then one or more clients (two terminals):
 
 ```
 ./scripts/start-server.sh    # state server on 127.0.0.1:8000
-./scripts/start-python-client.sh    # GUI client (run again for a second window)
+./scripts/start-python-client.sh    # Qt GUI client (run again for a second window)
+./scripts/start-web-client.sh    # Vite/React web client w/ HMR on http://localhost:5173
 ```
 
 These scripts are the stable dev interface: they hide the underlying tech so the
-workflow stays the same as it evolves (e.g. when the client becomes web-based).
-Both also live-reload on source edits. What they run today:
+workflow stays the same as it evolves. They all live-reload on source edits.
+What they run today:
 
 - **`start-server.sh`** → `docker compose watch`. The server runs containerized
   (FastAPI/uvicorn); on a save to `app/server-python/timeline_server.py` or
@@ -66,6 +67,12 @@ Both also live-reload on source edits. What they run today:
 - **`start-python-client.sh`** → `entr -r uv run app/client-python-qt/timeline_client.py`. The client is a
   self-contained renderer (it imports nothing from the model or server), so only
   its own file is watched — server/model edits don't relaunch the GUI.
+- **`start-web-client.sh`** → `npm run dev` (Vite) in `app/client-web`. Serves the
+  React/TS web client on `http://localhost:5173` with hot-module reload, and
+  proxies `/ws` to the backend on `:8000` (see `vite.config.ts`) so it talks to a
+  `start-server.sh` backend on the same origin. This dev server is local-only;
+  the shipped path is a production `vite build` baked into the server image and
+  served by the server itself (see below).
 
 The bind address comes from the `HOST`/`PORT` env vars (default `127.0.0.1:8000`
 for local dev; the container sets `HOST=0.0.0.0`). `GET /healthz` is a liveness
@@ -418,7 +425,23 @@ flowchart TB
   client <-->|"&laquo;WebSocket&raquo;"| lb
   lb -->|routes to| pod
 ```
-### (Next iteration) Replace Python+QT client with Vite+React+Typescript client
+### (Next iteration) Vite+React+TypeScript web client, served by the same node
 
-TODO needs very simple react+ts+shadcn(?) build/dev rig, and make server process/k8s node serve up the web assets in 
-minkube and upcloud deploy envs
+A second client lives in `app/client-web` (Vite + React + TypeScript). It is
+served by the **same** server process — and so the same minikube/UpCloud node and
+k8s Service — that owns `/ws`, with no second service and no CORS:
+
+- **Local dev** runs the two halves as separate hot-reloading processes:
+  `start-server.sh` (backend on `:8000`) and `start-web-client.sh` (Vite dev
+  server on `:5173`, proxying `/ws` → `:8000`). Edit-and-see is instant on both.
+- **Shipped build** collapses them onto one origin. The Dockerfile's first stage
+  (`web-build`) runs `npm ci && vite build`, then the server stage copies the
+  resulting `dist/` to `app/server-python/static/`. `timeline_server.py` mounts
+  that dir at `/` (with an `index.html` SPA fallback for deep links), guarded on
+  the dir existing so a plain `uv run` backend still boots without it. The hashed
+  `assets/` and the page load from the same host the WebSocket connects back to,
+  so the one image works unchanged on localhost, the minikube NodePort, and the
+  UpCloud load balancer. `static/` is generated, never committed (gitignored).
+
+The Qt client (`app/client-python-qt`) still works and targets the same backend;
+the web client is an additional front end, not yet a replacement.

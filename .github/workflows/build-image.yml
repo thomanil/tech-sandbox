@@ -30,8 +30,9 @@ on:
       - "Dockerfile"
       - ".dockerignore"
       - ".github/workflows/build-image.yml"
-      # Web client assets are baked into the image, so changes here need a rebuild.
-      - "app/server-python/static/**"
+      # The web client is built and baked into the image (Dockerfile web-build
+      # stage), so any change to its source needs a rebuild.
+      - "app/client-web/**"
   # Allow manual runs from the Actions tab (e.g. to republish without a code change).
   workflow_dispatch:
 
