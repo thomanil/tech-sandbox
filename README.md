@@ -22,6 +22,12 @@ playback controls (back / play / stop / forward). Play advances 5 ticks per
 second. A dropdown picks the sequence — `Linear`, `Primes`, or `Fibonacci` —
 and each remembers its own position.
 
+
+
+https://github.com/user-attachments/assets/0f184a50-a0fc-493b-9262-9a21439d7575
+
+
+
 State now lives in a separate **server** process: a FastAPI/uvicorn app
 (`timeline_server.py`) owns the timelines (per-sequence positions, the active
 sequence, and the play/pause flag) and runs the playback clock. The GUI
