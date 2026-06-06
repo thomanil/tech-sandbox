@@ -1,14 +1,22 @@
-# Build the timeline state server image and push it to GitHub Container
-# Registry (GHCR) on every push to main. This is the CI counterpart to the
-# local `minikube image build` in scripts/deploy-minikube.sh: instead of baking
-# the image into one developer's minikube, it publishes a shareable artifact at
+# Build the timeline state server image, push it to GitHub Container Registry
+# (GHCR), and roll it out to the public UpCloud cluster — the full CD path for
+# every push to main. This is the CI counterpart to the local
+# `minikube image build` in scripts/deploy-minikube.sh: instead of baking the
+# image into one developer's minikube, it publishes a shareable artifact at
 #   ghcr.io/<owner>/timeline-server:latest
 # that scripts/test-latest-main-image-on-minikube.sh then pulls and runs.
 #
 # The package must be PUBLIC for the unauthenticated minikube pull to work. GHCR
 # packages start private; flip it once under the package's settings (see README).
 # After that, this workflow's GITHUB_TOKEN keeps publishing new versions.
-name: Build and push server image
+#
+# After the push, the deploy-upcloud job forces a rollout on UpCloud so the new
+# :latest is actually pulled (imagePullPolicy: Always only re-pulls when a pod is
+# created — nothing polls GHCR on its own). It authenticates with the kubeconfig
+# committed at k8s/upcloud_timeline-public_kubeconfig.yaml, so no secret is
+# needed. (That kubeconfig holds cluster-admin creds in the repo — convenient for
+# a sandbox, but it's why this repo should stay private/trusted.)
+name: Build, push, and deploy server image
 
 on:
   push:
@@ -79,3 +87,34 @@ jobs:
           # Cache layers in GitHub Actions cache to keep rebuilds fast.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Continuous deployment: once the new image is in GHCR, roll it out to UpCloud.
+  # Reuses scripts/deploy-upcloud.sh so CI does exactly what a local deploy does
+  # (same manifest, context guard, rollout, and LB-address wait) — one source of
+  # truth for "deploy to UpCloud".
+  deploy-upcloud:
+    needs: build-and-push # only deploy an image that actually built and pushed
+    # Guard to main, so a workflow_dispatch from a feature branch can rebuild the
+    # image without redeploying production.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # only needs the repo (kubeconfig + manifest); no packages
+    # Serialize deploys so two quick pushes don't race rollouts on the single
+    # replica; queue rather than cancel so an in-flight rollout finishes.
+    concurrency:
+      group: upcloud-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      # The script pins KUBECONFIG to the committed UpCloud kubeconfig, asserts
+      # the expected cluster context, applies the manifest, forces a rollout, and
+      # waits for readiness. The load balancer already exists from the first
+      # deploy, so its address resolves immediately here.
+      - name: Roll out latest image to UpCloud
+        run: bash scripts/deploy-upcloud.sh

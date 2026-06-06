@@ -368,18 +368,30 @@ differences for a real cluster:
   `IfNotPresent`/`Never`), this cluster pulls from GHCR over the internet, so a
   rollout restart always lands the newest `:latest`.
 
+This deploy is also wired into CI for true continuous deployment: after the
+build-and-push job publishes a new `:latest`, a `deploy-upcloud` job in the same
+workflow runs `scripts/deploy-upcloud.sh` against the cluster (using the
+committed kubeconfig, so no secret is needed), forcing the rollout that pulls the
+new image. Without that step nothing would update on its own — `imagePullPolicy:
+Always` only re-pulls when a pod is *created*; nothing polls GHCR. The job is
+gated to `main` and serialized so two quick pushes don't race rollouts. You can
+still run `deploy-upcloud.sh` by hand for an out-of-band deploy. Note the trade-
+off: each auto-rollout restarts the single, in-memory-stateful pod, so connected
+clients drop and state resets on every deployed push to `main`.
+
 ```mermaid
 flowchart TB
   subgraph gh["☁️ GitHub &laquo;device&raquo;"]
     repo["push to main<br/>&laquo;event&raquo;"]
     subgraph actions["GitHub Actions &laquo;execution environment&raquo;"]
-      build["build-image.yml<br/>(docker buildx: amd64 + arm64)<br/>&laquo;artifact&raquo;"]
+      build["build-and-push job<br/>(docker buildx: amd64 + arm64)<br/>&laquo;artifact&raquo;"]
+      deploy["deploy-upcloud job<br/>(deploy-upcloud.sh: apply + rollout)<br/>&laquo;artifact&raquo;"]
     end
     ghcr["ghcr.io/thomanil/timeline-server:latest<br/>(public OCI image)<br/>&laquo;artifact&raquo;"]
   end
 
   subgraph dev2["💻 Developer Workstation &laquo;device&raquo;"]
-    script["deploy-upcloud.sh<br/>(kubectl apply + rollout)<br/>&laquo;artifact&raquo;"]
+    script["deploy-upcloud.sh<br/>(manual out-of-band deploy)<br/>&laquo;artifact&raquo;"]
     client["timeline_client.py<br/>(UpCloud → ws://&lt;lb-host&gt;/ws)<br/>&laquo;artifact&raquo;"]
   end
 
@@ -390,7 +402,9 @@ flowchart TB
 
   repo -->|triggers| build
   build -->|push| ghcr
-  script -->|deploy| pod
+  build -->|on success| deploy
+  deploy -->|rollout restart| pod
+  script -.->|manual| pod
   ghcr -.->|kubelet pull| pod
   client <-->|"&laquo;WebSocket&raquo;"| lb
   lb -->|routes to| pod
