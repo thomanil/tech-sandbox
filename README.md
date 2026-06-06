@@ -14,13 +14,19 @@ Launch:
 uv run timeline_app.py
 ```
 
+Launch with filewatch/"live reload" once code changes:
+
+```
+ls *.py | entr -r uv run timeline_app.py
+```
+
 Dependencies are declared inline in the script (PEP 723), so `uv` installs
 PySide6 into an ephemeral env on first run — no separate `pip install` step
 needed.
 
 ## Architecture
 
-Showing the evolution of the architecture in this repo; 
+Showing the evolution of the architecture in this repo;
 one uml deployment diagram per tagged version of this repo, last one is the current one.
 Checkout previous tags to see running example of previous versions.
 

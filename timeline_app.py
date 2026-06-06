@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -19,7 +20,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from timeline_model import TICKS_PER_SECOND, WINDOW_RADIUS, TimelineModel
+from timeline_model import (
+    SEQUENCES,
+    TICKS_PER_SECOND,
+    WINDOW_RADIUS,
+    TimelineModel,
+)
 
 
 class TimelineWidget(QWidget):
@@ -36,7 +42,9 @@ class TimelineWidget(QWidget):
         for _ in range(2 * WINDOW_RADIUS + 1):
             label = QLabel("")
             label.setAlignment(Qt.AlignCenter)
-            label.setFixedWidth(70)
+            # Minimum (not fixed) width: keeps spacing for small numbers but
+            # lets cells grow so large Fibonacci/prime values aren't truncated.
+            label.setMinimumWidth(70)
             self.labels.append(label)
             layout.addWidget(label)
 
@@ -74,6 +82,16 @@ class MainWindow(QMainWindow):
         self.timer.setInterval(int(1000 / TICKS_PER_SECOND))
         self.timer.timeout.connect(self.on_tick)
 
+        selector = QHBoxLayout()
+        selector.addStretch(1)
+        selector.addWidget(QLabel("Sequence:"))
+        self.sequence_combo = QComboBox()
+        self.sequence_combo.addItems(list(SEQUENCES.keys()))
+        self.sequence_combo.setCurrentText(self.timeline.model.sequence_name)
+        self.sequence_combo.currentTextChanged.connect(self.on_sequence_changed)
+        selector.addWidget(self.sequence_combo)
+        selector.addStretch(1)
+
         controls = QHBoxLayout()
         controls.addStretch(1)
         self.back_btn = self._make_button("⏮", self.on_back)
@@ -86,6 +104,7 @@ class MainWindow(QMainWindow):
 
         root = QVBoxLayout()
         root.addWidget(self.timeline, 1)
+        root.addLayout(selector)
         root.addLayout(controls)
 
         container = QWidget()
@@ -117,6 +136,10 @@ class MainWindow(QMainWindow):
 
     def on_forward(self) -> None:
         self.timeline.model.step_forward()
+        self.timeline.refresh()
+
+    def on_sequence_changed(self, name: str) -> None:
+        self.timeline.model.set_sequence(name)
         self.timeline.refresh()
 
 
