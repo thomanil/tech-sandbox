@@ -24,13 +24,11 @@ Dependencies are declared inline in the script (PEP 723), so `uv` installs
 PySide6 into an ephemeral env on first run — no separate `pip install` step
 needed.
 
-## Past and present architecture
+## Present (and past) architecture
 
-Showing the evolution of the architecture in this repo;
-one uml deployment diagram per tagged version of this repo, last one is the current one.
-Checkout previous tags to see running example of previous versions.
+Showing the evolution of the architecture in this repo.
 
-### (Current) v1: Python script + QT, all local
+### (Current) Python script + QT, all local
 
 A single computer runs this monolithic Python + Qt module. The two source
 modules (`timeline_app.py` entrypoint and `timeline_model.py` domain model)
