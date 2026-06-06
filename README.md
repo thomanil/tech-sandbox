@@ -186,7 +186,7 @@ flowchart TB
   qt -->|draws window| display
 ```
 
-### (Now) Local kubernetes deployment via minikube
+### (Fourth iteration) Local kubernetes deployment via minikube
 
 The same container is now the unit of a real Kubernetes deployment, run locally
 on [minikube](https://minikube.sigs.k8s.io/) so manifests can be iterated on
