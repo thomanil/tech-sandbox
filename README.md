@@ -277,8 +277,7 @@ flowchart TB
 
 ### (Next) Remote kubernetes deployments of server
 
-Not built yet. Once the local minikube path is solid, run remote instances in
-both GitHub (free?) and UpCloud (paid use). The manifests in `k8s/` are the
-starting point; remote clusters will add an Ingress + TLS and real hostnames
-(the stubbed `Remote Github` / `Remote UpCloud` entries in the client's
-`SERVERS` dict are placeholders for those).
+Not built yet. Once the local minikube path is solid, set up github workflow that builds image off of each push to main. 
+Add a separate "test-latest-main-image-on-minikube.sh" script that starts up minikube and pulls from that public image.
+
+Next step after THAT is to rig public remote deployment in upcloud, but lets do image push + minikube pull first.
