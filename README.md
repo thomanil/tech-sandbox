@@ -87,13 +87,13 @@ runtime, and drawn to the local display.
 
 ```mermaid
 flowchart TB
-  subgraph dev["💻 Developer Workstation &laquo;device&raquo;"]
-    subgraph uv["uv ephemeral venv &laquo;execution environment&raquo;"]
-      app["timeline_client.py<br/>(PySide6 GUI: timeline + transport controls)<br/>&laquo;artifact&raquo;"]
-      model["timeline_model.py<br/>(domain model)<br/>&laquo;artifact&raquo;"]
-      qt["PySide6 / Qt runtime<br/>&laquo;artifact&raquo;"]
+  subgraph dev["💻 Developer Workstation"]
+    subgraph uv["uv ephemeral venv"]
+      app["timeline_client.py<br/>(PySide6 GUI: timeline + transport controls)"]
+      model["timeline_model.py<br/>(domain model)"]
+      qt["PySide6 / Qt runtime"]
     end
-    display["X11 / Wayland display<br/>&laquo;device&raquo;"]
+    display["Desktop window"]
   end
 
   app -->|imports| model
@@ -117,19 +117,19 @@ timeline.
 
 ```mermaid
 flowchart TB
-  subgraph clientdev["💻 Developer Workstation &laquo;device&raquo;"]
-    subgraph uvclient["uv ephemeral venv &laquo;execution environment&raquo;"]
-      client["timeline_client.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>&laquo;artifact&raquo;"]
-      qt["PySide6 / Qt runtime<br/>&laquo;artifact&raquo;"]
+  subgraph clientdev["💻 Developer Workstation"]
+    subgraph uvclient["uv ephemeral venv"]
+      client["timeline_client.py<br/>(PySide6 + QWebSocket: thin renderer)"]
+      qt["PySide6 / Qt runtime"]
     end
-    display["X11 / Wayland display<br/>&laquo;device&raquo;"]
+    display["Desktop window"]
   end
 
-  subgraph serverdev["🖥️ API Server Host 127.0.0.1:8000 &laquo;device&raquo;"]
-    subgraph uvserver["uv ephemeral venv &laquo;execution environment&raquo;"]
-      server["timeline_server.py<br/>(FastAPI + uvicorn: owns state + asyncio ticker)<br/>&laquo;artifact&raquo;"]
-      model["timeline_model.py<br/>(domain model)<br/>&laquo;artifact&raquo;"]
-      fastapi["FastAPI / uvicorn / websockets runtime<br/>&laquo;artifact&raquo;"]
+  subgraph serverdev["🖥️ API Server Host 127.0.0.1:8000"]
+    subgraph uvserver["uv ephemeral venv"]
+      server["timeline_server.py<br/>(FastAPI + uvicorn: owns state + asyncio ticker)"]
+      model["timeline_model.py<br/>(domain model)"]
+      fastapi["FastAPI / uvicorn / websockets runtime"]
     end
   end
 
@@ -160,21 +160,21 @@ the deployment-shaped path toward k8s.
 
 ```mermaid
 flowchart TB
-  subgraph clientdev["💻 Developer Workstation &laquo;device&raquo;"]
-    subgraph uvclient["uv ephemeral venv &laquo;execution environment&raquo;"]
-      client["timeline_client.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>+ Server env dropdown: Local / Staging / Prod<br/>&laquo;artifact&raquo;"]
-      qt["PySide6 / Qt runtime<br/>&laquo;artifact&raquo;"]
+  subgraph clientdev["💻 Developer Workstation"]
+    subgraph uvclient["uv ephemeral venv"]
+      client["timeline_client.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>+ Server env dropdown: Local / Staging / Prod"]
+      qt["PySide6 / Qt runtime"]
     end
-    display["X11 / Wayland display<br/>&laquo;device&raquo;"]
+    display["Desktop window"]
   end
 
-  subgraph serverhost["🖥️ Container Host (port 8000 published) &laquo;device&raquo;"]
-    subgraph docker["🐳 Docker Engine &laquo;execution environment&raquo;"]
-      subgraph container["timeline-server:latest &laquo;container&raquo;"]
-        server["timeline_server.py<br/>(FastAPI + uvicorn: owns state + asyncio ticker)<br/>&laquo;artifact&raquo;"]
-        model["timeline_model.py<br/>(domain model)<br/>&laquo;artifact&raquo;"]
-        pydeps["CPython 3.11 + fastapi/uvicorn/websockets<br/>(installed at build; no uv at runtime)<br/>&laquo;artifact&raquo;"]
-        health["GET /healthz<br/>(liveness/readiness probe)<br/>&laquo;artifact&raquo;"]
+  subgraph serverhost["🖥️ Container Host (port 8000 published)"]
+    subgraph docker["🐳 Docker Engine"]
+      subgraph container["timeline-server:latest"]
+        server["timeline_server.py<br/>(FastAPI + uvicorn: owns state + asyncio ticker)"]
+        model["timeline_model.py<br/>(domain model)"]
+        pydeps["CPython 3.11 + fastapi/uvicorn/websockets<br/>(installed at build; no uv at runtime)"]
+        health["GET /healthz<br/>(liveness/readiness probe)"]
       end
     end
   end
@@ -249,21 +249,21 @@ minikube delete                              # nuke the cluster entirely
 
 ```mermaid
 flowchart TB
-  subgraph clientdev["💻 Developer Workstation &laquo;device&raquo;"]
-    subgraph uvclient["uv ephemeral venv &laquo;execution environment&raquo;"]
-      client["timeline_client.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>+ Server env dropdown: Local docker / Local minikube<br/>&laquo;artifact&raquo;"]
-      qt["PySide6 / Qt runtime<br/>&laquo;artifact&raquo;"]
+  subgraph clientdev["💻 Developer Workstation"]
+    subgraph uvclient["uv ephemeral venv"]
+      client["timeline_client.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>+ Server env dropdown: Local docker / Local minikube"]
+      qt["PySide6 / Qt runtime"]
     end
-    display["X11 / Wayland display<br/>&laquo;device&raquo;"]
+    display["Desktop window"]
   end
 
-  subgraph minikube["☸️ minikube cluster (docker driver) &laquo;device&raquo;"]
-    subgraph svc["Service timeline-server (NodePort 30080 → 8000) &laquo;artifact&raquo;"]
-      subgraph deploy["Deployment timeline-server (replicas: 1, Recreate) &laquo;artifact&raquo;"]
-        subgraph pod["Pod (runAsUser 10001) &laquo;container&raquo;"]
-          server["timeline_server.py<br/>(FastAPI + uvicorn: owns state + asyncio ticker)<br/>&laquo;artifact&raquo;"]
-          model["timeline_model.py<br/>(domain model)<br/>&laquo;artifact&raquo;"]
-          health["GET /healthz<br/>(liveness/readiness probe)<br/>&laquo;artifact&raquo;"]
+  subgraph minikube["☸️ minikube cluster (docker driver)"]
+    subgraph svc["Service timeline-server (NodePort 30080 → 8000)"]
+      subgraph deploy["Deployment timeline-server (replicas: 1, Recreate)"]
+        subgraph pod["Pod (runAsUser 10001)"]
+          server["timeline_server.py<br/>(FastAPI + uvicorn: owns state + asyncio ticker)"]
+          model["timeline_model.py<br/>(domain model)"]
+          health["GET /healthz<br/>(liveness/readiness probe)"]
         end
       end
     end
@@ -307,20 +307,20 @@ minikube** dropdown entry works unchanged for either path.
 
 ```mermaid
 flowchart TB
-  subgraph gh["☁️ GitHub &laquo;device&raquo;"]
-    repo["push to main<br/>&laquo;event&raquo;"]
-    subgraph actions["GitHub Actions &laquo;execution environment&raquo;"]
-      build["build-image.yml<br/>(docker buildx: amd64 + arm64)<br/>&laquo;artifact&raquo;"]
+  subgraph gh["☁️ GitHub"]
+    repo["push to main"]
+    subgraph actions["GitHub Actions"]
+      build["build-image.yml<br/>(docker buildx: amd64 + arm64)"]
     end
-    ghcr["ghcr.io/thomanil/timeline-server:latest<br/>(public OCI image)<br/>&laquo;artifact&raquo;"]
+    ghcr["ghcr.io/thomanil/timeline-server:latest<br/>(public OCI image)"]
   end
 
-  subgraph dev2["💻 Developer Workstation &laquo;device&raquo;"]
-    script["test-latest-main-image-on-minikube.sh<br/>(minikube image pull + apply + rollout)<br/>&laquo;artifact&raquo;"]
-    subgraph minikube["☸️ minikube cluster (docker driver) &laquo;device&raquo;"]
-      pod["Pod timeline-server<br/>(NodePort 30080 → 8000)<br/>&laquo;container&raquo;"]
+  subgraph dev2["💻 Developer Workstation"]
+    script["test-latest-main-image-on-minikube.sh<br/>(minikube image pull + apply + rollout)"]
+    subgraph minikube["☸️ minikube cluster (docker driver)"]
+      pod["Pod timeline-server<br/>(NodePort 30080 → 8000)"]
     end
-    client["timeline_client.py<br/>(Local minikube → ws://&lt;ip&gt;:30080/ws)<br/>&laquo;artifact&raquo;"]
+    client["timeline_client.py<br/>(Local minikube → ws://&lt;ip&gt;:30080/ws)"]
   end
 
   repo -->|triggers| build
@@ -381,23 +381,23 @@ clients drop and state resets on every deployed push to `main`.
 
 ```mermaid
 flowchart TB
-  subgraph gh["☁️ GitHub &laquo;device&raquo;"]
-    repo["push to main<br/>&laquo;event&raquo;"]
-    subgraph actions["GitHub Actions &laquo;execution environment&raquo;"]
-      build["build-and-push job<br/>(docker buildx: amd64 + arm64)<br/>&laquo;artifact&raquo;"]
-      deploy["deploy-upcloud job<br/>(deploy-upcloud.sh: apply + rollout)<br/>&laquo;artifact&raquo;"]
+  subgraph gh["☁️ GitHub"]
+    repo["push to main"]
+    subgraph actions["GitHub Actions"]
+      build["build-and-push job<br/>(docker buildx: amd64 + arm64)"]
+      deploy["deploy-upcloud job<br/>(deploy-upcloud.sh: apply + rollout)"]
     end
-    ghcr["ghcr.io/thomanil/timeline-server:latest<br/>(public OCI image)<br/>&laquo;artifact&raquo;"]
+    ghcr["ghcr.io/thomanil/timeline-server:latest<br/>(public OCI image)"]
   end
 
-  subgraph dev2["💻 Developer Workstation &laquo;device&raquo;"]
-    script["deploy-upcloud.sh<br/>(manual out-of-band deploy)<br/>&laquo;artifact&raquo;"]
-    client["timeline_client.py<br/>(UpCloud → ws://&lt;lb-host&gt;/ws)<br/>&laquo;artifact&raquo;"]
+  subgraph dev2["💻 Developer Workstation"]
+    script["deploy-upcloud.sh<br/>(manual out-of-band deploy)"]
+    client["timeline_client.py<br/>(UpCloud → ws://&lt;lb-host&gt;/ws)"]
   end
 
-  subgraph upcloud["☁️ UpCloud Managed Kubernetes &laquo;device&raquo;"]
-    lb["LoadBalancer Service<br/>(public host :80 → 8000)<br/>&laquo;artifact&raquo;"]
-    pod["Pod timeline-server<br/>(amd64 node)<br/>&laquo;container&raquo;"]
+  subgraph upcloud["☁️ UpCloud Managed Kubernetes"]
+    lb["LoadBalancer Service<br/>(public host :80 → 8000)"]
+    pod["Pod timeline-server<br/>(amd64 node)"]
   end
 
   repo -->|triggers| build
