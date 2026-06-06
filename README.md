@@ -20,7 +20,7 @@ Not every tool is needed for every workflow — see the "needed for" column.
 A small PySide6 GUI showing a centered scrolling number timeline with CD-style
 playback controls (back / play / stop / forward). Play advances 5 ticks per
 second. A dropdown picks the sequence — `Linear`, `Primes`, or `Fibonacci` —
-and each remembers its own position.
+and each sequence remembers your own position.
 
 _Started with local client only:_
 
