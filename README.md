@@ -409,3 +409,7 @@ flowchart TB
   client <-->|"&laquo;WebSocket&raquo;"| lb
   lb -->|routes to| pod
 ```
+### (Next iteration) Replace Python+QT client with Vite+React+Typescript client
+
+TODO needs very simple react+ts+shadcn(?) build/dev rig, and make server process/k8s node serve up the web assets in 
+minkube and upcloud deploy envs
