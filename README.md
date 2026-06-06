@@ -47,7 +47,7 @@ needed.
 
 ## Present (and past) architecture
 
-Showing the evolution of the architecture in this repo.
+Showing the evolution of the architecture in this repo. Each incarnation has its own git tag in this repo.
 
 ### (Previous) Python script + QT, all local
 
