@@ -20,37 +20,27 @@ dropdown beside the sequence picker for choosing which backend to connect to
 Launch — start the server first, then one or more clients (two terminals):
 
 ```
-uv run timeline_server.py    # state server on 127.0.0.1:8000
-uv run timeline_client.py       # GUI client (run again for a second window)
+./scripts/start-server.sh    # state server on 127.0.0.1:8000
+./scripts/start-client.sh    # GUI client (run again for a second window)
 ```
 
-The server is also containerized. To run it in Docker instead of `uv` (the
-client still runs locally and connects on `localhost:8000`):
+These scripts are the stable dev interface: they hide the underlying tech so the
+workflow stays the same as it evolves (e.g. when the client becomes web-based).
+Both also live-reload on source edits. What they run today:
 
-```
-docker compose up --build    # state server on 127.0.0.1:8000
-docker compose watch         # same, but hot-reload on a source save
-```
-
-`docker compose watch` is the server-side analog of the client's `entr -r`
-below: edit `timeline_server.py` or `timeline_model.py` and Compose syncs the
-file into the container, where uvicorn's `--reload` watcher hot-reloads the app
-in place — no image rebuild, no container restart. Compose is a local dev
-convenience only; the image's prod `CMD` runs plain `python` with no reloader.
+- **`start-server.sh`** → `docker compose watch`. The server runs containerized
+  (FastAPI/uvicorn); on a save to `timeline_server.py` or `timeline_model.py`,
+  Compose syncs the file into the running container and uvicorn's `--reload`
+  watcher hot-reloads in place — no image rebuild, no container restart. Compose
+  is a local dev convenience only; the image's prod `CMD` runs plain `python`
+  with no reloader.
+- **`start-client.sh`** → `entr -r uv run timeline_client.py`. The client is a
+  self-contained renderer (it imports nothing from the model or server), so only
+  its own file is watched — server/model edits don't relaunch the GUI.
 
 The bind address comes from the `HOST`/`PORT` env vars (default `127.0.0.1:8000`
 for local dev; the container sets `HOST=0.0.0.0`). `GET /healthz` is a liveness
 probe for the compose healthcheck and future k8s deployment.
-
-Launch the client with filewatch/"live reload" once code changes:
-
-```
-echo timeline_client.py | entr -r uv run timeline_client.py
-```
-
-The client is a self-contained renderer (it imports nothing from the model or
-server), so only its own file should trigger a restart — feeding `entr` just
-`timeline_client.py` avoids needlessly relaunching the GUI on server/model edits.
 
 Dependencies are declared inline in each script (PEP 723), so `uv` installs
 them into an ephemeral env on first run — no separate `pip install` step
