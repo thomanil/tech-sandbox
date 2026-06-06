@@ -1,0 +1,7 @@
+.git
+__pycache__/
+*.pyc
+.venv/
+# Client + docs aren't needed in the server image.
+timeline_app.py
+README.md

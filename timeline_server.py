@@ -11,7 +11,11 @@
 Single source of truth: this process owns the timeline state in memory
 (per-sequence indices, the active sequence, and the play/pause flag) and runs
 the playback ticker. The GUI client is a thin renderer that streams commands in
-and state out over one WebSocket — there are no REST endpoints.
+and state out over one WebSocket. The only REST route is GET /healthz, a
+liveness/readiness probe for container orchestration (Docker/k8s).
+
+Bind host/port come from the HOST/PORT env vars (default 127.0.0.1:8000) so the
+container can publish on 0.0.0.0 without code changes; see Dockerfile.
 
 Everything here runs on a single asyncio event loop: the WebSocket handler
 coroutines, the ticker task, and broadcasts are cooperatively scheduled and
@@ -126,6 +130,12 @@ async def handle_command(msg: dict) -> None:
     await manager.broadcast(state_message())
 
 
+@app.get("/healthz")
+async def healthz() -> dict:
+    """Liveness/readiness probe for Docker/k8s. Cheap and side-effect-free."""
+    return {"status": "ok"}
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     await manager.connect(ws)
@@ -141,6 +151,11 @@ async def ws_endpoint(ws: WebSocket) -> None:
 
 
 if __name__ == "__main__":
+    import os
+
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # Default to loopback for local dev; the container sets HOST=0.0.0.0.
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8000"))
+    uvicorn.run(app, host=host, port=port)

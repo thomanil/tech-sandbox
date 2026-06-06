@@ -13,7 +13,9 @@ State now lives in a separate **server** process: a FastAPI/uvicorn app
 (`timeline_server.py`) owns the timeline (per-sequence positions, the active
 sequence, and the play/pause flag) and runs the playback clock. The GUI
 (`timeline_app.py`) is a thin client that streams commands and state over one
-WebSocket — so multiple GUI clients stay in sync.
+WebSocket — so multiple GUI clients stay in sync. The client has a **Server**
+dropdown beside the sequence picker for choosing which backend to connect to
+(only `Local` is wired up for now; Staging/Production are stubbed in `SERVERS`).
 
 Launch — start the server first, then one or more clients (two terminals):
 
@@ -21,6 +23,17 @@ Launch — start the server first, then one or more clients (two terminals):
 uv run timeline_server.py    # state server on 127.0.0.1:8000
 uv run timeline_app.py       # GUI client (run again for a second window)
 ```
+
+The server is also containerized. To run it in Docker instead of `uv` (the
+client still runs locally and connects on `localhost:8000`):
+
+```
+docker compose up --build    # state server on 127.0.0.1:8000
+```
+
+The bind address comes from the `HOST`/`PORT` env vars (default `127.0.0.1:8000`
+for local dev; the container sets `HOST=0.0.0.0`). `GET /healthz` is a liveness
+probe for the compose healthcheck and future k8s deployment.
 
 Launch the client with filewatch/"live reload" once code changes:
 
@@ -94,3 +107,18 @@ flowchart TB
   client -->|renders via| qt
   qt -->|draws window| display
 ```
+
+### (Next) Containerized server
+
+The server now ships as a Docker image (`Dockerfile`, `docker-compose.yml`) so
+it can run as an isolated container locally and be hosted by Kubernetes later.
+The image is built from the official `uv` base: the PEP 723 inline deps in
+`timeline_server.py` stay the single source of truth and are resolved with
+`uv export --script` at build time, installed system-wide, and run under a
+non-root user with plain `python` (no runtime resolution). The bind address is
+env-driven (`HOST`/`PORT`), the container publishing on `0.0.0.0:8000`, and
+`GET /healthz` backs the compose healthcheck (and future k8s liveness/readiness
+probes). The Qt client is **not** containerized — it stays on the developer's
+desktop and reaches the published port; its **Server** dropdown selects the
+environment (`Local` today, `Staging`/`Production` stubbed for when those
+backends exist). No Kubernetes manifests yet — that's the next step.

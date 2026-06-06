@@ -32,7 +32,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-SERVER_URL = "ws://127.0.0.1:8000/ws"
+# Server environments the client can connect to. Only Local is wired up for
+# now; uncomment/add Staging and Production here when those backends exist.
+SERVERS = {
+    "Local": "ws://127.0.0.1:8000/ws",
+    # "Staging": "ws://staging.internal:8000/ws",
+    # "Production": "wss://timeline.example.com/ws",
+}
+DEFAULT_SERVER = "Local"
 
 
 class TimelineWidget(QWidget):
@@ -103,6 +110,12 @@ class MainWindow(QMainWindow):
         self._suppress_combo = False
         self._combo_ready = False
 
+        # Which backend we talk to; switched live via the Server dropdown.
+        self._server_url = SERVERS[DEFAULT_SERVER]
+        # Guards against the server combo's change signal firing while we
+        # populate it (would trigger a spurious reconnect).
+        self._suppress_server_combo = False
+
         # Banner shown when the server is unreachable; hidden while connected.
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -111,6 +124,17 @@ class MainWindow(QMainWindow):
 
         selector = QHBoxLayout()
         selector.addStretch(1)
+        selector.addWidget(QLabel("Server:"))
+        self.server_combo = QComboBox()
+        # Populate up front (client-side static list) under the suppress guard
+        # so it doesn't fire a reconnect before we've even connected.
+        self._suppress_server_combo = True
+        self.server_combo.addItems(list(SERVERS.keys()))
+        self.server_combo.setCurrentText(DEFAULT_SERVER)
+        self._suppress_server_combo = False
+        self.server_combo.currentTextChanged.connect(self.on_server_changed)
+        selector.addWidget(self.server_combo)
+        selector.addSpacing(24)
         selector.addWidget(QLabel("Sequence:"))
         self.sequence_combo = QComboBox()
         self.sequence_combo.currentTextChanged.connect(self.on_sequence_changed)
@@ -174,7 +198,7 @@ class MainWindow(QMainWindow):
     def _try_connect(self) -> None:
         # Only (re)open when fully closed; avoids stacking connection attempts.
         if self.ws.state() == QAbstractSocket.SocketState.UnconnectedState:
-            self.ws.open(QUrl(SERVER_URL))
+            self.ws.open(QUrl(self._server_url))
 
     def _set_offline(self, message: str, is_error: bool) -> None:
         """Show the status banner, disable controls, and keep retrying."""
@@ -208,7 +232,7 @@ class MainWindow(QMainWindow):
     def on_error(self, _error) -> None:
         self.setWindowTitle("Timeline (disconnected)")
         self._set_offline(
-            f"Cannot reach server at {SERVER_URL}. "
+            f"Cannot reach server at {self._server_url}. "
             "Is timeline_server.py running? Retrying…",
             is_error=True,
         )
@@ -252,6 +276,17 @@ class MainWindow(QMainWindow):
         if self._suppress_combo:
             return
         self._send({"type": "command", "action": "set_sequence", "name": name})
+
+    def on_server_changed(self, name: str) -> None:
+        """Switch which backend we talk to: tear down the current connection and
+        reconnect to the chosen environment's URL."""
+        if self._suppress_server_combo:
+            return
+        self._server_url = SERVERS[name]
+        self.reconnect_timer.stop()
+        self.ws.abort()  # drop the current connection immediately
+        self._set_offline(f"Connecting to {name}…", is_error=False)
+        self._try_connect()
 
 
 def main() -> int:

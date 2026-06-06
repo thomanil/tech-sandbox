@@ -1,0 +1,18 @@
+services:
+  timeline-server:
+    build: .
+    image: timeline-server:latest
+    ports:
+      - "8000:8000"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8000"
+    healthcheck:
+      # The slim image has no curl; probe /healthz with python's stdlib instead.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
