@@ -23,12 +23,37 @@ never truly parallel, so the shared `model`/`playing` state needs no locks.
 """
 
 import asyncio
+import logging
+import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from timeline_model import SEQUENCES, TICKS_PER_SECOND, TimelineModel
+
+# --- logging -----------------------------------------------------------------
+#
+# Dedicated logger writing to stdout, which Docker/k8s capture verbatim
+# (`docker logs`, `kubectl logs`). It owns its own handler and does not
+# propagate, so it works the same however the app is launched (uvicorn
+# programmatically below, `uvicorn timeline_server:app`, or `uv run`) and never
+# double-prints through uvicorn's root config. We log discrete client events
+# (connects, playback commands) but deliberately NOT the ticker's auto-advance,
+# which fires TICKS_PER_SECOND times a second per playing client.
+
+logger = logging.getLogger("timeline")
+if not logger.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)s [timeline] %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 # --- authoritative in-memory state ------------------------------------------
 #
@@ -145,20 +170,28 @@ app = FastAPI(lifespan=lifespan)
 async def handle_command(client_id: int, msg: dict) -> None:
     state = get_state(client_id)
     action = msg.get("action")
+    m = state.model
     if action == "forward":
-        state.model.step_forward()
+        m.step_forward()
+        logger.info("client %s forward -> %s index %d", client_id, m.sequence_name, m.index)
     elif action == "back":
-        state.model.step_back()
+        m.step_back()
+        logger.info("client %s back -> %s index %d", client_id, m.sequence_name, m.index)
     elif action == "play":
         state.playing = True
+        logger.info("client %s play (%s @ index %d)", client_id, m.sequence_name, m.index)
     elif action == "stop":
         state.playing = False
+        logger.info("client %s stop (%s @ index %d)", client_id, m.sequence_name, m.index)
     elif action == "set_sequence":
         name = msg.get("name")
         if name not in SEQUENCES:
+            logger.warning("client %s set_sequence rejected: %r", client_id, name)
             return
-        state.model.set_sequence(name)
+        m.set_sequence(name)
+        logger.info("client %s set_sequence -> %s", client_id, name)
     else:
+        logger.warning("client %s unknown action: %r", client_id, action)
         return  # unknown action -> no state change, no send
     await manager.send_to_client(client_id, state_message(state))
 
@@ -179,17 +212,35 @@ async def ws_endpoint(ws: WebSocket) -> None:
         await ws.close(code=1008)  # policy violation
         return
 
+    # Resuming an existing seed vs. a brand-new one changes the connect message.
+    known = client_id in states
     await manager.connect(ws, client_id)
-    # Initial full state for this client (resumes prior state if the seed is known).
-    await ws.send_json(state_message(get_state(client_id)))
+    logger.info(
+        "client %s %s -- %d connected %s, %d known",
+        client_id,
+        "reconnected" if known else "connected",
+        len(manager.conns),
+        sorted(manager.conns),
+        len(states),
+    )
     try:
+        # Initial full state for this client (resumes prior state if seed is known).
+        await ws.send_json(state_message(get_state(client_id)))
         while True:
             msg = await ws.receive_json()
             await handle_command(client_id, msg)
     except WebSocketDisconnect:
-        manager.disconnect(ws, client_id)
+        pass
     except Exception:
+        pass
+    finally:
         manager.disconnect(ws, client_id)
+        logger.info(
+            "client %s disconnected -- %d connected %s",
+            client_id,
+            len(manager.conns),
+            sorted(manager.conns),
+        )
 
 
 if __name__ == "__main__":
