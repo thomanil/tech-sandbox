@@ -72,7 +72,7 @@ flowchart TB
   qt -->|draws window| display
 ```
 
-### (Current) Thin GUI client + state server over WebSocket
+### (Previous) Thin GUI client + state server over WebSocket
 
 State moves out of the GUI into a separate server process. A FastAPI/uvicorn
 app (`timeline_server.py`) owns the timeline model (per-sequence positions, the
@@ -108,17 +108,60 @@ flowchart TB
   qt -->|draws window| display
 ```
 
-### (Next) Containerized server
+### (Current) Containerized server
 
-The server now ships as a Docker image (`Dockerfile`, `docker-compose.yml`) so
-it can run as an isolated container locally and be hosted by Kubernetes later.
-The image is built from the official `uv` base: the PEP 723 inline deps in
-`timeline_server.py` stay the single source of truth and are resolved with
-`uv export --script` at build time, installed system-wide, and run under a
-non-root user with plain `python` (no runtime resolution). The bind address is
-env-driven (`HOST`/`PORT`), the container publishing on `0.0.0.0:8000`, and
-`GET /healthz` backs the compose healthcheck (and future k8s liveness/readiness
-probes). The Qt client is **not** containerized — it stays on the developer's
-desktop and reaches the published port; its **Server** dropdown selects the
-environment (`Local` today, `Staging`/`Production` stubbed for when those
-backends exist). No Kubernetes manifests yet — that's the next step.
+The wire protocol is unchanged — same WebSocket, same client role — but the
+server's *packaging and runtime* move out of a uv ephemeral venv into a Docker
+container. The image (`Dockerfile`, orchestrated by `docker-compose.yml`) is
+built from Astral's pinned uv base, resolves the PEP 723 inline deps **at build
+time** with `uv export --script`, and installs them system-wide. So the running
+container is just CPython 3.11 + FastAPI/uvicorn under a non-root user — no uv
+resolution at startup. The container publishes `8000:8000` to the host, and
+Docker Compose probes `GET /healthz` as a healthcheck — the same endpoint a
+future Kubernetes liveness/readiness probe will use.
+
+The Qt client stays a thin renderer, but now selects its backend via the
+**Server** dropdown (`Local` today; `Staging`/`Production` stubbed), so one
+client binary can target different environments. Running the server the old way
+(`uv run timeline_server.py`) still works for quick local dev — the container is
+the deployment-shaped path toward k8s.
+
+```mermaid
+flowchart TB
+  subgraph clientdev["💻 Developer Workstation &laquo;device&raquo;"]
+    subgraph uvclient["uv ephemeral venv &laquo;execution environment&raquo;"]
+      client["timeline_app.py<br/>(PySide6 + QWebSocket: thin renderer)<br/>+ Server env dropdown: Local / Staging / Prod<br/>&laquo;artifact&raquo;"]
+      qt["PySide6 / Qt runtime<br/>&laquo;artifact&raquo;"]
+    end
+    display["X11 / Wayland display<br/>&laquo;device&raquo;"]
+  end
+
+  subgraph serverhost["🖥️ Container Host (port 8000 published) &laquo;device&raquo;"]
+    subgraph docker["🐳 Docker Engine &laquo;execution environment&raquo;"]
+      subgraph container["timeline-server:latest &laquo;container&raquo;"]
+        server["timeline_server.py<br/>(FastAPI + uvicorn: owns state + asyncio ticker)<br/>&laquo;artifact&raquo;"]
+        model["timeline_model.py<br/>(domain model)<br/>&laquo;artifact&raquo;"]
+        pydeps["CPython 3.11 + fastapi/uvicorn/websockets<br/>(installed at build; no uv at runtime)<br/>&laquo;artifact&raquo;"]
+        health["GET /healthz<br/>(liveness/readiness probe)<br/>&laquo;artifact&raquo;"]
+      end
+    end
+  end
+
+  client <-->|"&laquo;WebSocket&raquo; ws://127.0.0.1:8000/ws<br/>state push / command send"| server
+  docker -->|"publishes 8000:8000"| container
+  docker -.->|"compose healthcheck polls"| health
+  health -.->|routes to| server
+  server -->|imports| model
+  server -->|served by| pydeps
+  client -->|renders via| qt
+  qt -->|draws window| display
+```
+
+### (Next) Kubernetes
+
+Not built yet. The container is the unit of deployment: a `Deployment` running
+the `timeline-server` image, a `Service` fronting port 8000, and liveness /
+readiness probes wired to `GET /healthz`. Multi-client sync already holds across
+WebSocket connections, so a single replica is the natural starting point (the
+in-memory state is per-process, so horizontal scaling would need shared state
+first).
