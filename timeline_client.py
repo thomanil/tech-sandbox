@@ -43,8 +43,7 @@ SERVERS = {
     # minikube's own; it's stable on the docker driver but if you recreate the
     # cluster, update this to whatever scripts/deploy-minikube.sh prints.
     "Local minikube": "ws://192.168.49.2:30080/ws",
-    # "Remote Github": "ws://staging.internal:8000/ws",
-    # "Remote UpCloud": "wss://timeline.example.com/ws",
+    "Remote UpCloud": "ws://lb-0acd94799dc24f208d245ba808d7fdbe-1.upcloudlb.com/ws",
 }
 DEFAULT_SERVER = "Local docker"
 

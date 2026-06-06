@@ -1,0 +1,104 @@
+# Public deployment of the timeline state server on UpCloud Managed Kubernetes.
+#
+# This is the remote counterpart to timeline-server-published.yaml (minikube):
+# same single-replica/Recreate rules and the same GHCR image, but exposed for
+# real public access. Two deliberate differences from the minikube manifests:
+#
+#   1. Service type is LoadBalancer (not NodePort). UpCloud's cloud controller
+#      provisions a managed load balancer with its own public hostname, so the
+#      client reaches the server from anywhere and the endpoint survives the
+#      node being replaced. Port 80 is published and forwarded to the container's
+#      8000, so clients connect at ws://<lb-host>/ws (no port needed).
+#
+#   2. imagePullPolicy is Always. Unlike minikube (where the image is pre-pulled
+#      and IfNotPresent/Never reuses it), this cluster pulls from GHCR over the
+#      internet. With :latest + Always, a `kubectl rollout restart` always lands
+#      the freshest image CI pushed to main.
+#
+# The GHCR package must be PUBLIC so the kubelet can pull it without credentials
+# (it already is — that's the same property the minikube test path relies on).
+#
+# Apply with scripts/deploy-upcloud.sh, which targets the UpCloud kubeconfig,
+# forces a rollout, and prints the load balancer URL once it's provisioned.
+#
+# Single replica on purpose: the server holds per-client state in memory and
+# runs one ticker for everyone (see timeline_server.py), so it must never scale
+# past 1 — a second pod would have independent state and the LB would split
+# clients across them. Recreate (not RollingUpdate) keeps it to one pod at a time.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: timeline-server
+  labels:
+    app: timeline-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: timeline-server
+  template:
+    metadata:
+      labels:
+        app: timeline-server
+    spec:
+      # Matches the non-root user baked into the image (useradd --uid 10001 app).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: timeline-server
+          # The image CI pushes on every push to main. Public GHCR package, so
+          # no imagePullSecret is needed.
+          image: ghcr.io/thomanil/timeline-server:latest
+          # Real cluster with registry access: always pull the freshest :latest
+          # so a rollout restart picks up the newest main build.
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            # Bind on all interfaces inside the pod. PORT defaults to 8000 via
+            # the Dockerfile's ENV, so it's not repeated here.
+            - name: HOST
+              value: "0.0.0.0"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: timeline-server
+  labels:
+    app: timeline-server
+spec:
+  type: LoadBalancer
+  selector:
+    app: timeline-server
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80          # public port on the load balancer
+      targetPort: 8000  # container port

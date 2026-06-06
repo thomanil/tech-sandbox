@@ -330,8 +330,68 @@ flowchart TB
   client <-->|"&laquo;WebSocket&raquo;"| pod
 ```
 
-### (Next) Remote kubernetes deployments of server
+### (Sixth iteration) Public remote deployment on UpCloud
 
-With the image now published to GHCR and pull-tested on minikube (above), the
-next step is a real public remote deployment — wiring the same image up to a
-managed/remote Kubernetes target (e.g. UpCloud).
+With the image published to GHCR and pull-tested on minikube (above), this
+iteration runs it for real: a public deployment on **UpCloud Managed
+Kubernetes**, pulling the exact same `ghcr.io/thomanil/timeline-server:latest`
+that CI builds on every push to `main`. Nothing is built or pushed from a
+developer machine — UpCloud pulls the published artifact straight from GHCR (it
+can, because the package is public), so `main` is the single source of truth for
+what runs remotely.
+
+```
+./scripts/deploy-upcloud.sh
+```
+
+It pins every `kubectl` call to the committed UpCloud kubeconfig
+(`k8s/upcloud_timeline-public_kubeconfig.yaml`) so it can never touch a local
+context by accident, asserts it's aimed at the expected cluster, applies
+`k8s/timeline-server-upcloud.yaml`, forces a rollout (so the freshest `:latest`
+is pulled), waits for readiness, then waits for the load balancer's public
+hostname and prints the client URL.
+
+The UpCloud manifest is the public-remote sibling of the minikube ones — same
+single-replica/`Recreate` rules and the same GHCR image — with two deliberate
+differences for a real cluster:
+
+- **`Service` type `LoadBalancer`** (not `NodePort`). UpCloud's cloud controller
+  provisions a managed load balancer with its own stable public hostname,
+  forwarding port `80` to the container's `8000`, so the client connects at
+  `ws://<lb-host>/ws` from anywhere. The load balancer is provisioned **once**
+  and persists with a fixed hostname across redeploys — re-running the script
+  just re-applies and rolls out, it does not create a new one. (It only goes
+  away, and the hostname changes, if you delete the `Service`:
+  `kubectl --kubeconfig k8s/upcloud_timeline-public_kubeconfig.yaml delete -f k8s/timeline-server-upcloud.yaml`
+  — which also stops the load balancer's running cost.)
+- **`imagePullPolicy: Always`.** Unlike minikube (image pre-pulled, so
+  `IfNotPresent`/`Never`), this cluster pulls from GHCR over the internet, so a
+  rollout restart always lands the newest `:latest`.
+
+```mermaid
+flowchart TB
+  subgraph gh["☁️ GitHub &laquo;device&raquo;"]
+    repo["push to main<br/>&laquo;event&raquo;"]
+    subgraph actions["GitHub Actions &laquo;execution environment&raquo;"]
+      build["build-image.yml<br/>(docker buildx: amd64 + arm64)<br/>&laquo;artifact&raquo;"]
+    end
+    ghcr["ghcr.io/thomanil/timeline-server:latest<br/>(public OCI image)<br/>&laquo;artifact&raquo;"]
+  end
+
+  subgraph dev2["💻 Developer Workstation &laquo;device&raquo;"]
+    script["deploy-upcloud.sh<br/>(kubectl apply + rollout)<br/>&laquo;artifact&raquo;"]
+    client["timeline_client.py<br/>(UpCloud → ws://&lt;lb-host&gt;/ws)<br/>&laquo;artifact&raquo;"]
+  end
+
+  subgraph upcloud["☁️ UpCloud Managed Kubernetes &laquo;device&raquo;"]
+    lb["LoadBalancer Service<br/>(public host :80 → 8000)<br/>&laquo;artifact&raquo;"]
+    pod["Pod timeline-server<br/>(amd64 node)<br/>&laquo;container&raquo;"]
+  end
+
+  repo -->|triggers| build
+  build -->|push| ghcr
+  script -->|deploy| pod
+  ghcr -.->|kubelet pull| pod
+  client <-->|"&laquo;WebSocket&raquo;"| lb
+  lb -->|routes to| pod
+```
