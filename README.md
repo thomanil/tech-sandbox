@@ -353,18 +353,26 @@ is pulled), waits for readiness, then waits for the load balancer's public
 hostname and prints the client URL.
 
 The UpCloud manifest is the public-remote sibling of the minikube ones — same
-single-replica/`Recreate` rules and the same GHCR image — with two deliberate
+single-replica/`Recreate` rules and the same GHCR image — with three deliberate
 differences for a real cluster:
 
 - **`Service` type `LoadBalancer`** (not `NodePort`). UpCloud's cloud controller
   provisions a managed load balancer with its own stable public hostname,
-  forwarding port `80` to the container's `8000`, so the client connects at
-  `ws://<lb-host>/ws` from anywhere. The load balancer is provisioned **once**
-  and persists with a fixed hostname across redeploys — re-running the script
-  just re-applies and rolls out, it does not create a new one. (It only goes
-  away, and the hostname changes, if you delete the `Service`:
+  forwarding both `443` and `80` to the container's `8000`, so the client
+  connects at `wss://<lb-host>/ws` from anywhere. The load balancer is
+  provisioned **once** and persists with a fixed hostname across redeploys —
+  re-running the script just re-applies and rolls out, it does not create a new
+  one. (It only goes away, and the hostname changes, if you delete the `Service`:
   `kubectl --kubeconfig k8s/upcloud_timeline-public_kubeconfig.yaml delete -f k8s/timeline-server-upcloud.yaml`
   — which also stops the load balancer's running cost.)
+- **TLS terminated at the load balancer.** The `Service` carries a
+  `service.beta.kubernetes.io/upcloud-load-balancer-config` annotation putting
+  the `443` frontend in `http` mode. Per UpCloud's load balancer docs, an
+  http-mode frontend on `443` with no `tls_config` triggers **auto-TLS**: UpCloud
+  provisions and renews a managed certificate for the `lb-*.upcloudlb.com`
+  hostname automatically — no cert files in the repo. http mode (vs raw `tcp`) is
+  also what lets the LB handle the WebSocket upgrade, so the secure client URL is
+  `wss://<lb-host>/ws`. Plain `:80` is kept alongside for `curl`/healthz checks.
 - **`imagePullPolicy: Always`.** Unlike minikube (image pre-pulled, so
   `IfNotPresent`/`Never`), this cluster pulls from GHCR over the internet, so a
   rollout restart always lands the newest `:latest`.
@@ -393,11 +401,11 @@ flowchart TB
 
   subgraph dev2["💻 Developer Workstation"]
     script["deploy-upcloud.sh<br/>(manual out-of-band deploy)"]
-    client["timeline_client.py<br/>(UpCloud → ws://&lt;lb-host&gt;/ws)"]
+    client["timeline_client.py<br/>(UpCloud → wss://&lt;lb-host&gt;/ws)"]
   end
 
   subgraph upcloud["☁️ UpCloud Managed Kubernetes"]
-    lb["LoadBalancer Service<br/>(public host :80 → 8000)"]
+    lb["LoadBalancer Service<br/>(public host :443 TLS / :80 → 8000)"]
     pod["Pod timeline-server<br/>(amd64 node)"]
   end
 
