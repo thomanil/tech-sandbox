@@ -275,9 +275,67 @@ flowchart TB
   qt -->|draws window| display
 ```
 
+### (Fifth iteration) CI-built image on GHCR, pulled into local minikube
+
+Until now the image only ever existed on one machine — `deploy-minikube.sh`
+builds it straight into minikube from the working tree. This iteration publishes
+it. A GitHub Actions workflow (`.github/workflows/build-image.yml`) builds the
+server image on every push to `main` (that touches the server, Dockerfile, or
+`.dockerignore`) and pushes a **multi-arch** (`amd64` + `arm64`) image to GitHub
+Container Registry as `ghcr.io/thomanil/timeline-server`, tagged `:latest` plus
+an immutable `:sha-…`. The build uses the same `Dockerfile`, so CI and local
+produce the same artifact — CI just shares it.
+
+A new script pulls that published image back down and runs it on minikube, as an
+end-to-end test of the real artifact (not local source):
+
+```
+./scripts/test-latest-main-image-on-minikube.sh
+```
+
+It pre-pulls `ghcr.io/thomanil/timeline-server:latest` into minikube (failing
+fast with a clear message if the package is missing or still private), applies
+`k8s/timeline-server-published.yaml`, forces a rollout, waits for readiness, and
+prints the same `ws://<minikube-ip>:30080/ws` URL. The published manifest reuses
+the same `Deployment`/`Service` names and NodePort as the local one — only the
+`image` (GHCR instead of `timeline-server:latest`) and `imagePullPolicy`
+(`IfNotPresent`, since the script pre-pulls) differ — so the client's **Local
+minikube** dropdown entry works unchanged for either path.
+
+**One-time setup — make the GHCR package public.** GHCR packages start private,
+and the minikube pull is unauthenticated. After the workflow's first run on
+`main`, open the package at
+`https://github.com/thomanil/tech-sandbox/pkgs/container/timeline-server` →
+*Package settings* → *Change visibility* → **Public**. The workflow itself needs
+no extra secrets — it pushes with the built-in `GITHUB_TOKEN` (`packages: write`).
+
+```mermaid
+flowchart TB
+  subgraph gh["☁️ GitHub &laquo;device&raquo;"]
+    repo["push to main<br/>&laquo;event&raquo;"]
+    subgraph actions["GitHub Actions &laquo;execution environment&raquo;"]
+      build["build-image.yml<br/>(docker buildx: amd64 + arm64)<br/>&laquo;artifact&raquo;"]
+    end
+    ghcr["ghcr.io/thomanil/timeline-server:latest<br/>(public OCI image)<br/>&laquo;artifact&raquo;"]
+  end
+
+  subgraph dev2["💻 Developer Workstation &laquo;device&raquo;"]
+    script["test-latest-main-image-on-minikube.sh<br/>(minikube image pull + apply + rollout)<br/>&laquo;artifact&raquo;"]
+    subgraph minikube["☸️ minikube cluster (docker driver) &laquo;device&raquo;"]
+      pod["Pod timeline-server<br/>(NodePort 30080 → 8000)<br/>&laquo;container&raquo;"]
+    end
+    client["timeline_client.py<br/>(Local minikube → ws://&lt;ip&gt;:30080/ws)<br/>&laquo;artifact&raquo;"]
+  end
+
+  repo -->|triggers| build
+  build -->|push| ghcr
+  ghcr -.->|pull| script
+  script -->|deploy| pod
+  client <-->|"&laquo;WebSocket&raquo;"| pod
+```
+
 ### (Next) Remote kubernetes deployments of server
 
-Not built yet. Once the local minikube path is solid, set up github workflow that builds image off of each push to main. 
-Add a separate "test-latest-main-image-on-minikube.sh" script that starts up minikube and pulls from that public image.
-
-Next step after THAT is to rig public remote deployment in upcloud, but lets do image push + minikube pull first.
+With the image now published to GHCR and pull-tested on minikube (above), the
+next step is a real public remote deployment — wiring the same image up to a
+managed/remote Kubernetes target (e.g. UpCloud).
