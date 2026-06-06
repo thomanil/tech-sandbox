@@ -49,7 +49,7 @@ needed.
 
 Showing the evolution of the architecture in this repo.
 
-### Python script + QT, all local
+### (Previous) Python script + QT, all local
 
 A single computer runs this monolithic Python + Qt module. The two source
 modules (`timeline_app.py` entrypoint and `timeline_model.py` domain model)
