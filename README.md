@@ -21,10 +21,10 @@ needed.
 
 ## Architecture
 
-One uml deployment diagram per tagged version of this repo, 
+One uml deployment diagram per tagged version of this repo,
 showing how the app is deployed/distributed/run, and which moving parts exist
 
-### v1: Python script + QT, all local
+### (Current) v1: Python script + QT, all local
 
 A single computer runs this monolithic Python + Qt module. The two source
 modules (`timeline_app.py` entrypoint and `timeline_model.py` domain model)
@@ -45,4 +45,4 @@ flowchart TB
   app -->|imports| model
   app -->|renders via| qt
   qt -->|draws window| display
-``` 
+```
