@@ -10,12 +10,18 @@ second. A dropdown picks the sequence — `Linear`, `Primes`, or `Fibonacci` —
 and each remembers its own position.
 
 State now lives in a separate **server** process: a FastAPI/uvicorn app
-(`timeline_server.py`) owns the timeline (per-sequence positions, the active
+(`timeline_server.py`) owns the timelines (per-sequence positions, the active
 sequence, and the play/pause flag) and runs the playback clock. The GUI
 (`timeline_client.py`) is a thin client that streams commands and state over one
-WebSocket — so multiple GUI clients stay in sync. The client has a **Server**
-dropdown beside the sequence picker for choosing which backend to connect to
-(only `Local` is wired up for now; Staging/Production are stubbed in `SERVERS`).
+WebSocket. State is **per client**: each client process generates a random
+integer seed at startup, sends it as `?client_id=` on the WebSocket URL, and the
+server keeps an independent timeline per seed — so two windows can sit on
+different sequences, positions, and play/pause states at once. A single
+server-side ticker drives them all, advancing only the clients currently
+playing. State is keyed by seed and persists across reconnects, so a client
+resumes where it left off. The client has a **Server** dropdown beside the
+sequence picker for choosing which backend to connect to (only `Local` is wired
+up for now; Staging/Production are stubbed in `SERVERS`).
 
 Launch — start the server first, then one or more clients (two terminals):
 
@@ -76,13 +82,16 @@ flowchart TB
 ### (Second iteration) Thin GUI client + state server over WebSocket
 
 State moves out of the GUI into a separate server process. A FastAPI/uvicorn
-app (`timeline_server.py`) owns the timeline model (per-sequence positions, the
+app (`timeline_server.py`) owns the timeline models (per-sequence positions, the
 active sequence, the play/pause flag) and runs the tick loop as an asyncio
-task, broadcasting state to every connected client over a WebSocket. The
-PySide6 client (`timeline_client.py`) is a thin renderer: it sends command
-messages (forward / back / play / stop / set_sequence) and redraws whatever
-window the server pushes back. The two run as separate processes, so multiple
-clients stay in sync.
+task. State is per client, keyed by the integer seed each client sends as
+`?client_id=` on the WebSocket URL: the server holds one `TimelineModel` + play
+flag per seed (`states: dict[int, ClientState]`), and the single ticker advances
+only the seeds currently playing, pushing each its own state. The PySide6 client
+(`timeline_client.py`) is a thin renderer: it sends command messages (forward /
+back / play / stop / set_sequence) and redraws whatever window the server pushes
+back. The two run as separate processes, and each client has its own independent
+timeline.
 
 ```mermaid
 flowchart TB

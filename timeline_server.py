@@ -24,25 +24,47 @@ never truly parallel, so the shared `model`/`playing` state needs no locks.
 
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from timeline_model import SEQUENCES, TICKS_PER_SECOND, TimelineModel
 
-# --- authoritative in-memory state -----------------------------------------
+# --- authoritative in-memory state ------------------------------------------
+#
+# State is per client, not global. Each client process generates an integer
+# seed (its client id, sent as the ?client_id= URL param) and the server keeps
+# one timeline + play flag per seed. State is keyed by seed and persists across
+# reconnects, so a dropped-and-reopened client resumes where it left off; it is
+# never evicted (a bounded, acceptable leak for a local dev demo).
 
-model = TimelineModel()  # owns per-sequence _indices + active sequence_name
-playing = False
+
+@dataclass
+class ClientState:
+    model: TimelineModel = field(default_factory=TimelineModel)
+    playing: bool = False
 
 
-def state_message() -> dict:
-    """The single message shape pushed to clients on connect and every change."""
+states: dict[int, ClientState] = {}
+
+
+def get_state(client_id: int) -> ClientState:
+    """The single place per-client state is born; called on connect and on every
+    command, so a command can never hit a missing client."""
+    state = states.get(client_id)
+    if state is None:
+        state = states[client_id] = ClientState()
+    return state
+
+
+def state_message(state: ClientState) -> dict:
+    """The single message shape pushed to a client on connect and every change."""
     return {
         "type": "state",
-        "window": model.visible_window(),
-        "sequence_name": model.sequence_name,
+        "window": state.model.visible_window(),
+        "sequence_name": state.model.sequence_name,
         "sequences": list(SEQUENCES.keys()),
-        "playing": playing,
+        "playing": state.playing,
     }
 
 
@@ -51,26 +73,35 @@ def state_message() -> dict:
 
 class ConnectionManager:
     def __init__(self) -> None:
-        self.active: set[WebSocket] = set()
+        # One client (seed) may briefly have several live sockets — e.g. a
+        # reconnect that overlaps the dying old one — so map each id to a set.
+        self.conns: dict[int, set[WebSocket]] = {}
 
-    async def connect(self, ws: WebSocket) -> None:
+    async def connect(self, ws: WebSocket, client_id: int) -> None:
         await ws.accept()
-        self.active.add(ws)
+        self.conns.setdefault(client_id, set()).add(ws)
 
-    def disconnect(self, ws: WebSocket) -> None:
-        self.active.discard(ws)
+    def disconnect(self, ws: WebSocket, client_id: int) -> None:
+        # Drop only the live socket; states[client_id] is deliberately kept so
+        # the client resumes its timeline when it reconnects with the same seed.
+        sockets = self.conns.get(client_id)
+        if sockets is None:
+            return
+        sockets.discard(ws)
+        if not sockets:
+            del self.conns[client_id]
 
-    async def broadcast(self, message: dict) -> None:
+    async def send_to_client(self, client_id: int, message: dict) -> None:
         # Iterate a snapshot; drop any socket that fails mid-send so one dead
-        # client can't break the broadcast to the others.
+        # connection can't break delivery to this client's other sockets.
         dead: list[WebSocket] = []
-        for ws in list(self.active):
+        for ws in list(self.conns.get(client_id, set())):
             try:
                 await ws.send_json(message)
             except Exception:
                 dead.append(ws)
         for ws in dead:
-            self.active.discard(ws)
+            self.disconnect(ws, client_id)
 
 
 manager = ConnectionManager()
@@ -80,18 +111,20 @@ manager = ConnectionManager()
 
 
 async def ticker() -> None:
-    """While playing, advance ONLY the active sequence and broadcast each tick.
+    """One driver for every client: each tick, advance only the clients that are
+    currently playing and push each its own updated state.
 
-    `model.step_forward()` writes `_indices[sequence_name]`, so inactive
-    sequences stay frozen at their last position — never advance a global
-    counter or loop over sequences here.
+    `model.step_forward()` writes `_indices[sequence_name]`, so a client's
+    inactive sequences stay frozen at their last position. Iterate a snapshot of
+    `states` because a connect/disconnect can mutate it across the `await`.
     """
     interval = 1 / TICKS_PER_SECOND
     while True:
         await asyncio.sleep(interval)
-        if playing:
-            model.step_forward()
-            await manager.broadcast(state_message())
+        for client_id, state in list(states.items()):
+            if state.playing:
+                state.model.step_forward()
+                await manager.send_to_client(client_id, state_message(state))
 
 
 @asynccontextmanager
@@ -109,25 +142,25 @@ app = FastAPI(lifespan=lifespan)
 # --- command dispatch + websocket endpoint ---------------------------------
 
 
-async def handle_command(msg: dict) -> None:
-    global playing
+async def handle_command(client_id: int, msg: dict) -> None:
+    state = get_state(client_id)
     action = msg.get("action")
     if action == "forward":
-        model.step_forward()
+        state.model.step_forward()
     elif action == "back":
-        model.step_back()
+        state.model.step_back()
     elif action == "play":
-        playing = True
+        state.playing = True
     elif action == "stop":
-        playing = False
+        state.playing = False
     elif action == "set_sequence":
         name = msg.get("name")
         if name not in SEQUENCES:
             return
-        model.set_sequence(name)
+        state.model.set_sequence(name)
     else:
-        return  # unknown action -> no state change, no broadcast
-    await manager.broadcast(state_message())
+        return  # unknown action -> no state change, no send
+    await manager.send_to_client(client_id, state_message(state))
 
 
 @app.get("/healthz")
@@ -138,16 +171,25 @@ async def healthz() -> dict:
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
-    await manager.connect(ws)
-    await ws.send_json(state_message())  # initial full state to this client
+    # The client identifies itself with an integer seed in the URL
+    # (ws://.../ws?client_id=<seed>); reject a connection without a valid one.
+    try:
+        client_id = int(ws.query_params.get("client_id"))
+    except (TypeError, ValueError):
+        await ws.close(code=1008)  # policy violation
+        return
+
+    await manager.connect(ws, client_id)
+    # Initial full state for this client (resumes prior state if the seed is known).
+    await ws.send_json(state_message(get_state(client_id)))
     try:
         while True:
             msg = await ws.receive_json()
-            await handle_command(msg)
+            await handle_command(client_id, msg)
     except WebSocketDisconnect:
-        manager.disconnect(ws)
+        manager.disconnect(ws, client_id)
     except Exception:
-        manager.disconnect(ws)
+        manager.disconnect(ws, client_id)
 
 
 if __name__ == "__main__":

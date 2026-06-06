@@ -15,6 +15,7 @@ owns the state and the playback clock; see timeline_server.py.
 """
 
 import json
+import random
 import sys
 
 from PySide6.QtCore import Qt, QTimer, QUrl
@@ -132,6 +133,11 @@ class MainWindow(QMainWindow):
 
         # Which backend we talk to; switched live via the Server dropdown.
         self._server_url = SERVERS[DEFAULT_SERVER]
+        # This client's identity: a random integer seed generated once per
+        # process and sent as ?client_id= on every connection. The server keys
+        # its per-client timeline on it, so it must stay stable across reconnects
+        # and server switches for state to resume — hence set once, here.
+        self._client_id = random.randint(1, 2_147_483_647)
         # Guards against the server combo's change signal firing while we
         # populate it (would trigger a spurious reconnect).
         self._suppress_server_combo = False
@@ -223,8 +229,9 @@ class MainWindow(QMainWindow):
 
     def _try_connect(self) -> None:
         # Only (re)open when fully closed; avoids stacking connection attempts.
+        # The seed rides the URL so the server can key our state at connect time.
         if self.ws.state() == QAbstractSocket.SocketState.UnconnectedState:
-            self.ws.open(QUrl(self._server_url))
+            self.ws.open(QUrl(f"{self._server_url}?client_id={self._client_id}"))
 
     def _set_offline(self, message: str, is_error: bool) -> None:
         """Show the status banner, disable controls, and keep retrying."""
