@@ -425,21 +425,33 @@ flowchart TB
   client <-->|"&laquo;WebSocket&raquo;"| lb
   lb -->|routes to| pod
 ```
-### (Next iteration) Vite+React+TypeScript web client, served by the same node
+### (Seventh iteration) Vite + React + TypeScript web client, served by the same node
 
 A second client lives in `app/client-web` (Vite + React + TypeScript, UI built
 with [shadcn/ui](https://ui.shadcn.com) + Tailwind v4). It mirrors the Qt client
-feature-for-feature — the scrolling timeline window (center value accented,
-neighbours fading with distance), the Sequence picker, and the ⏮/▶/■/⏭ transport
-— as a thin renderer over one WebSocket (`useTimelineSocket`):
+feature-for-feature — the scrolling timeline window, the Sequence picker, and the
+⏮/▶/■/⏭ transport — as a thin renderer over one WebSocket (`useTimelineSocket`):
 it holds no state, draws whatever window the server pushes, auto-reconnects while
 the server is down, and disables the controls behind a status banner when
-offline. It is served by the **same** server process — and so the same
-minikube/UpCloud node and k8s Service — that owns `/ws`, with no second service
-and no CORS. (The Qt client's Server-environment dropdown is shown only in local
-dev, where the Vite dev server is a separate origin; in the shipped build the
-backend is fixed to the serving origin, so the picker is hidden — gated on
-`import.meta.env.DEV`.):
+offline.
+
+The timeline window (`TimelineWindow.tsx`) ports the Qt client's render: the
+centre value is large, bold, and accented, and it **auto-scales down to fit its
+cell** so a long (5+ digit) number shrinks instead of overflowing — the same idea
+as the Qt client's `_fitted_font`, done here by dividing a usable cell width by
+the monospace digit count. The neighbours fall away from the centre on three
+cues at once — a muted base colour, opacity dropping steeply with distance
+(~0.8 → ~0.15), and the font shrinking — so the row visibly trails off toward its
+edges while keeping a stable width. (Opacity-toward-background is used rather than
+the Qt client's literal grey ramp so the fade stays correct in dark mode, where a
+fixed grey would *brighten* instead of recede.)
+
+It is served by the **same** server process — and so the same minikube/UpCloud
+node and k8s Service — that owns `/ws`, with no second service and no CORS. The
+Server-environment picker is shown only in local dev, where the Vite dev server
+is a separate origin; in the shipped build the backend is fixed to the serving
+origin, so the picker is hidden — gated on `import.meta.env.DEV` (see
+`servers.ts` / `TimelinePlayer.tsx`).
 
 - **Local dev** runs the two halves as separate hot-reloading processes:
   `start-server.sh` (backend on `:8000`) and `start-web-client.sh` (Vite dev
@@ -452,6 +464,64 @@ backend is fixed to the serving origin, so the picker is hidden — gated on
   `assets/` and the page load from the same host the WebSocket connects back to,
   so the one image works unchanged on localhost, the minikube NodePort, and the
   UpCloud load balancer. `static/` is generated, never committed (gitignored).
+
+So there are now two architectural shapes depending on how it's run. **In local
+dev** the page and the backend are two origins, bridged by Vite's `/ws` proxy:
+
+```mermaid
+flowchart TB
+  subgraph dev["💻 Developer Workstation"]
+    subgraph browser["🌐 Browser @ localhost:5173"]
+      web["app/client-web (React/TS, shadcn/ui)<br/>thin renderer over useTimelineSocket<br/>+ Server picker (dev-only)"]
+    end
+    vite["Vite dev server :5173<br/>(HMR; proxies /ws → :8000)"]
+    subgraph uvclient["uv ephemeral venv"]
+      qt["app/client-python-qt (PySide6 + QWebSocket)<br/>thin renderer + Server dropdown"]
+    end
+    subgraph srv["start-server.sh backend (docker compose) :8000"]
+      server["timeline_server.py<br/>(FastAPI + uvicorn: state + asyncio ticker)"]
+      model["timeline_model.py<br/>(domain model)"]
+    end
+  end
+
+  web -->|"page load + HMR"| vite
+  web <-->|"&laquo;WebSocket&raquo; /ws (same origin :5173)"| vite
+  vite <-->|"dev proxy /ws → :8000"| server
+  qt <-->|"&laquo;WebSocket&raquo; ws://127.0.0.1:8000/ws"| server
+  server -->|imports| model
+```
+
+**In the shipped image** the two stages of the Dockerfile bake the web build into
+the server, which then serves the SPA and `/ws` from one origin — so the browser
+talks back to exactly the host it loaded from, on minikube or UpCloud alike:
+
+```mermaid
+flowchart TB
+  subgraph image["🛠️ Dockerfile (multi-stage build)"]
+    webbuild["web-build stage (node)<br/>npm ci &amp;&amp; vite build → dist/"]
+    serverstage["server stage (uv/python)<br/>COPY dist/ → static/ ; install deps"]
+    webbuild -->|"dist/"| serverstage
+  end
+
+  browser["🌐 Browser (any host)<br/>app/client-web SPA<br/>(Server picker hidden in prod)"]
+  qt["💻 Qt client (desktop, optional)<br/>Server dropdown → Local minikube / UpCloud"]
+
+  subgraph node["☸️ One container on minikube / UpCloud (port 8000)"]
+    static["StaticFiles mount at /<br/>(SPA + hashed assets, index.html SPA fallback)"]
+    ws["/ws WebSocket endpoint"]
+    server["timeline_server.py<br/>(FastAPI + uvicorn: state + asyncio ticker)"]
+    model["timeline_model.py<br/>(domain model)"]
+    health["GET /healthz (probe)"]
+  end
+
+  serverstage -.->|"baked into image"| node
+  browser -->|"GET / (page + hashed assets)"| static
+  browser <-->|"&laquo;WebSocket&raquo; same-origin /ws"| ws
+  qt <-->|"&laquo;WebSocket&raquo; ws(s)://&lt;host&gt;/ws"| ws
+  static -->|served by| server
+  ws -->|handled by| server
+  server -->|imports| model
+```
 
 The Qt client (`app/client-python-qt`) still works and targets the same backend;
 the web client is an additional front end, not yet a replacement.
