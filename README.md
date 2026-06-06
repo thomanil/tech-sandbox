@@ -302,13 +302,6 @@ the same `Deployment`/`Service` names and NodePort as the local one — only the
 (`IfNotPresent`, since the script pre-pulls) differ — so the client's **Local
 minikube** dropdown entry works unchanged for either path.
 
-**One-time setup — make the GHCR package public.** GHCR packages start private,
-and the minikube pull is unauthenticated. After the workflow's first run on
-`main`, open the package at
-`https://github.com/thomanil/tech-sandbox/pkgs/container/timeline-server` →
-*Package settings* → *Change visibility* → **Public**. The workflow itself needs
-no extra secrets — it pushes with the built-in `GITHUB_TOKEN` (`packages: write`).
-
 ```mermaid
 flowchart TB
   subgraph gh["☁️ GitHub &laquo;device&raquo;"]
