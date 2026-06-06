@@ -18,12 +18,13 @@ import json
 import sys
 
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtNetwork import QAbstractSocket
 from PySide6.QtWebSockets import QWebSocket
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -44,6 +45,12 @@ DEFAULT_SERVER = "Local"
 
 class TimelineWidget(QWidget):
     """Renders a timeline window pushed from the server. Holds no state."""
+
+    CELL_WIDTH = 84  # fixed cell width — the window doesn't grow with big numbers
+    CELL_PADDING = 12  # horizontal breathing room inside a cell
+    CENTER_PT = 36  # ideal font size for the centered value
+    NEIGHBOR_PT = 20  # ideal font size for the fading neighbours
+    MIN_FONT_PT = 9  # don't shrink below this (only extreme magnitudes hit it)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -69,11 +76,23 @@ class TimelineWidget(QWidget):
         for _ in range(count):
             label = QLabel("")
             label.setAlignment(Qt.AlignCenter)
-            # Minimum (not fixed) width: keeps spacing for small numbers but
-            # lets cells grow so large Fibonacci/prime values aren't truncated.
-            label.setMinimumWidth(70)
+            # Fixed width keeps the whole layout (and the controls below) put;
+            # render_window() shrinks the font instead so big numbers still fit.
+            label.setFixedWidth(self.CELL_WIDTH)
             self.labels.append(label)
             self._layout.insertWidget(self._layout.count() - 1, label)
+
+    def _fitted_font(self, text: str, base_pt: int, bold: bool) -> QFont:
+        """Largest Helvetica font (<= base_pt) whose text fits one fixed-width
+        cell. Only over-long numbers shrink; everything else renders at base_pt."""
+        avail = self.CELL_WIDTH - self.CELL_PADDING
+        font = QFont("Helvetica", base_pt)
+        font.setBold(bold)
+        pt = base_pt
+        while pt > self.MIN_FONT_PT and QFontMetrics(font).horizontalAdvance(text) > avail:
+            pt -= 1
+            font.setPointSize(pt)
+        return font
 
     def render_window(self, window: list) -> None:
         """Draw the server-provided window: center value bold/blue, neighbors fade."""
@@ -85,14 +104,15 @@ class TimelineWidget(QWidget):
                 label.setText("")
                 label.setStyleSheet("")
                 continue
-            label.setText(str(n))
+            text = str(n)
+            label.setText(text)
             if offset_from_center == 0:
-                label.setFont(QFont("Helvetica", 36, QFont.Bold))
+                label.setFont(self._fitted_font(text, self.CENTER_PT, bold=True))
                 label.setStyleSheet("color: #1f6feb;")
             else:
                 fade = 1.0 - abs(offset_from_center) / (radius + 1)
                 gray = int(220 - 140 * fade)
-                label.setFont(QFont("Helvetica", 20))
+                label.setFont(self._fitted_font(text, self.NEIGHBOR_PT, bold=False))
                 label.setStyleSheet(f"color: rgb({gray}, {gray}, {gray});")
 
 
@@ -122,9 +142,6 @@ class MainWindow(QMainWindow):
         self.status_label.setWordWrap(True)
         self.status_label.hide()
 
-        selector = QHBoxLayout()
-        selector.addStretch(1)
-        selector.addWidget(QLabel("Server:"))
         self.server_combo = QComboBox()
         # Populate up front (client-side static list) under the suppress guard
         # so it doesn't fire a reconnect before we've even connected.
@@ -133,12 +150,21 @@ class MainWindow(QMainWindow):
         self.server_combo.setCurrentText(DEFAULT_SERVER)
         self._suppress_server_combo = False
         self.server_combo.currentTextChanged.connect(self.on_server_changed)
-        selector.addWidget(self.server_combo)
-        selector.addSpacing(24)
-        selector.addWidget(QLabel("Sequence:"))
+
         self.sequence_combo = QComboBox()
         self.sequence_combo.currentTextChanged.connect(self.on_sequence_changed)
-        selector.addWidget(self.sequence_combo)
+
+        # Two pickers stacked one above the other (labels right-aligned so the
+        # combos line up), the whole grid centered horizontally.
+        picker_grid = QGridLayout()
+        picker_grid.addWidget(QLabel("Sequence:"), 0, 0, Qt.AlignRight)
+        picker_grid.addWidget(self.sequence_combo, 0, 1)
+        picker_grid.addWidget(QLabel("Server:"), 1, 0, Qt.AlignRight)
+        picker_grid.addWidget(self.server_combo, 1, 1)
+
+        selector = QHBoxLayout()
+        selector.addStretch(1)
+        selector.addLayout(picker_grid)
         selector.addStretch(1)
 
         controls = QHBoxLayout()
