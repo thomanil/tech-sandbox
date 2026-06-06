@@ -50,7 +50,7 @@ needed.
 
 Showing the evolution of the architecture in this repo. Each incarnation has its own git tag in this repo.
 
-### (Previous) Python script + QT, all local
+### (First iteration) Python script + QT, all local
 
 A single computer runs this monolithic Python + Qt module. The two source
 modules (`timeline_client.py` entrypoint and `timeline_model.py` domain model)
@@ -73,7 +73,7 @@ flowchart TB
   qt -->|draws window| display
 ```
 
-### (Previous) Thin GUI client + state server over WebSocket
+### (Second iteration) Thin GUI client + state server over WebSocket
 
 State moves out of the GUI into a separate server process. A FastAPI/uvicorn
 app (`timeline_server.py`) owns the timeline model (per-sequence positions, the
@@ -109,7 +109,7 @@ flowchart TB
   qt -->|draws window| display
 ```
 
-### (Current) Containerized server
+### (Third iteration) Containerized server
 
 The wire protocol is unchanged — same WebSocket, same client role — but the
 server's *packaging and runtime* move out of a uv ephemeral venv into a Docker
