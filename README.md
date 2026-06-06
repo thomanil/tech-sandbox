@@ -6,14 +6,14 @@ Simple playground and example sandbox for some tech, tools and techniques.
 
 Not every tool is needed for every workflow — see the "needed for" column.
 
-| Tool | What for | Needed for |
-| --- | --- | --- |
-| [Python](https://www.python.org/) 3.11+ | Runs the client and server | everything |
+| Tool | What for                                                                        | Needed for |
+| --- |---------------------------------------------------------------------------------| --- |
+| [Python](https://www.python.org/) 3.11+ | Runs the client and server                                                      | everything |
 | [uv](https://docs.astral.sh/uv/) | Resolves the PEP 723 inline deps and runs the scripts (no manual `pip install`) | running client/server locally |
-| [entr](https://eradman.com/entrproject/) | Restarts the GUI client on source edits (`start-client.sh`) | the client live-reload script |
-| [Docker](https://docs.docker.com/get-docker/) | Builds/runs the server container; also minikube's default driver | compose dev **and** minikube |
-| [minikube](https://minikube.sigs.k8s.io/docs/start/) | Local single-node Kubernetes cluster | local k8s deploy |
-| [kubectl](https://kubernetes.io/docs/tasks/tools/) | Applies manifests and drives the cluster | local k8s deploy |
+| [entr](https://eradman.com/entrproject/) | Restarts the GUI client on source edits (`start-python-client.sh`)              | the client live-reload script |
+| [Docker](https://docs.docker.com/get-docker/) | Builds/runs the server container; also minikube's default driver                | compose dev **and** minikube |
+| [minikube](https://minikube.sigs.k8s.io/docs/start/) | Local single-node Kubernetes cluster                                            | local k8s deploy |
+| [kubectl](https://kubernetes.io/docs/tasks/tools/) | Applies manifests and drives the cluster                                        | local k8s deploy |
 
 ## Current incarnation
 
@@ -49,7 +49,7 @@ Launch — start the server first, then one or more clients (two terminals):
 
 ```
 ./scripts/start-server.sh    # state server on 127.0.0.1:8000
-./scripts/start-client.sh    # GUI client (run again for a second window)
+./scripts/start-python-client.sh    # GUI client (run again for a second window)
 ```
 
 These scripts are the stable dev interface: they hide the underlying tech so the
@@ -63,7 +63,7 @@ Both also live-reload on source edits. What they run today:
   watcher hot-reloads in place — no image rebuild, no container restart. Compose
   is a local dev convenience only; the image's prod `CMD` runs plain `python`
   with no reloader.
-- **`start-client.sh`** → `entr -r uv run app/client-python-qt/timeline_client.py`. The client is a
+- **`start-python-client.sh`** → `entr -r uv run app/client-python-qt/timeline_client.py`. The client is a
   self-contained renderer (it imports nothing from the model or server), so only
   its own file is watched — server/model edits don't relaunch the GUI.
 
