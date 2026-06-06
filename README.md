@@ -18,11 +18,11 @@ Dependencies are declared inline in the script (PEP 723), so `uv` installs
 PySide6 into an ephemeral env on first run — no separate `pip install` step
 needed.
 
-
 ## Architecture
 
-One uml deployment diagram per tagged version of this repo,
-showing how the app is deployed/distributed/run, and which moving parts exist
+Showing the evolution of the architecture in this repo; 
+one uml deployment diagram per tagged version of this repo, last one is the current one.
+Checkout previous tags to see running example of previous versions.
 
 ### (Current) v1: Python script + QT, all local
 
