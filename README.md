@@ -167,11 +167,14 @@ flowchart TB
   qt -->|draws window| display
 ```
 
-### (Next) Kubernetes
+### (Next) Remote kubernetes deployments of server
 
 Not built yet. The container is the unit of deployment: a `Deployment` running
 the `timeline-server` image, a `Service` fronting port 8000, and liveness /
 readiness probes wired to `GET /healthz`. Multi-client sync already holds across
 WebSocket connections, so a single replica is the natural starting point (the
 in-memory state is per-process, so horizontal scaling would need shared state
-first).
+first). 
+
+Make it run locally in minkube so we can test manifests etc quickly. Once that works, run remote instances
+in both github (free?) and Upcloud (paid use)
