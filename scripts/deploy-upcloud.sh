@@ -90,7 +90,7 @@ if [[ -z "$LB_HOST" ]]; then
 fi
 
 echo "timeline-server is live on UpCloud. Point the client at:"
-echo "    ws://${LB_HOST}/ws"
+echo "    wss://${LB_HOST}/ws"
 echo
 echo "Health check:  curl -fsS http://${LB_HOST}/healthz"
 echo "Logs:          kubectl --kubeconfig $KUBECONFIG_FILE logs -f deployment/timeline-server --timestamps"
