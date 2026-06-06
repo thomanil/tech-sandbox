@@ -14,6 +14,11 @@ FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim@sha256:4f5d923c9dcea037f57bda
 
 WORKDIR /app
 
+# curl is used by the compose healthcheck to probe /healthz.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY timeline_model.py timeline_server.py ./
 
 # Keep the PEP 723 inline metadata in timeline_server.py as the single source of

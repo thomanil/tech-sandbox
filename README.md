@@ -29,7 +29,12 @@ client still runs locally and connects on `localhost:8000`):
 
 ```
 docker compose up --build    # state server on 127.0.0.1:8000
+docker compose watch         # same, but rebuild + relaunch on a source save
 ```
+
+`docker compose watch` is the server-side analog of the client's `entr -r`
+below: edit `timeline_server.py` or `timeline_model.py` and Compose rebuilds the
+image and relaunches the container automatically.
 
 The bind address comes from the `HOST`/`PORT` env vars (default `127.0.0.1:8000`
 for local dev; the container sets `HOST=0.0.0.0`). `GET /healthz` is a liveness
