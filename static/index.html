@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<!--
+  STUB web client — placeholder only.
+
+  This entire static/ directory is a temporary stand-in. It exists to prove that
+  the single FastAPI/uvicorn server (and the single k8s node behind it) can serve
+  web assets AND the /ws WebSocket from the same process, port, and origin — no
+  second service, no CORS.
+
+  NEXT ITERATION (see README): replace this dir with the output of a local Vite
+  build. `vite build` emits dist/ containing index.html plus hashed files under
+  dist/assets/. Wire-up then:
+    - Dockerfile: multi-stage node build → COPY --from=build /web/dist ./static
+    - timeline_server.py: also mount /assets and add an SPA deep-link fallback
+      (see the TODO(vite) comment there).
+
+  The real client will open a WebSocket on the SAME origin it was served from:
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      new WebSocket(`${proto}//${location.host}/ws?client_id=${seed}`);
+  Deriving it from location.* makes it work unchanged on localhost, the minikube
+  NodePort, and the UpCloud load balancer.
+
+  TLS / mixed content caveat: this stub is served over http:// (so ws:// is fine).
+  Once the page is served over https://, the socket MUST become wss:// — browsers
+  block an insecure ws:// from a secure page.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Timeline — web client (stub)</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: system-ui, sans-serif;
+        background: #111;
+        color: #eee;
+      }
+      .stub {
+        text-align: center;
+      }
+      .stub code {
+        color: #9cdcfe;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="stub">
+      <h1>TODO - vite client here later</h1>
+      <p>Served by <code>timeline_server.py</code> from the same origin as <code>/ws</code>.</p>
+    </main>
+  </body>
+</html>

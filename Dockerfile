@@ -21,6 +21,12 @@ RUN apt-get update \
 
 COPY timeline_model.py timeline_server.py ./
 
+# Web client assets. STUB: copies the placeholder static/ page so the server can
+# serve it at / alongside /ws. When a local Vite build exists, replace this with a
+# multi-stage build — a node stage that runs `vite build`, then
+# `COPY --from=build /web/dist ./static` here (see static/index.html + README).
+COPY static ./static
+
 # Keep the PEP 723 inline metadata in timeline_server.py as the single source of
 # truth for dependencies: resolve them with uv and install system-wide at build
 # time, so container startup needs no network and no runtime resolution.

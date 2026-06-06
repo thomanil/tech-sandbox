@@ -11,8 +11,9 @@
 Single source of truth: this process owns the timeline state in memory
 (per-sequence indices, the active sequence, and the play/pause flag) and runs
 the playback ticker. The GUI client is a thin renderer that streams commands in
-and state out over one WebSocket. The only REST route is GET /healthz, a
-liveness/readiness probe for container orchestration (Docker/k8s).
+and state out over one WebSocket. GET /healthz is a liveness/readiness probe for
+container orchestration (Docker/k8s), and (when present) the static/ dir is served
+at / as the web client — same app, port, and origin as /ws.
 
 Bind host/port come from the HOST/PORT env vars (default 127.0.0.1:8000) so the
 container can publish on 0.0.0.0 without code changes; see Dockerfile.
@@ -27,8 +28,10 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 
 from timeline_model import SEQUENCES, TICKS_PER_SECOND, TimelineModel
 
@@ -265,6 +268,24 @@ async def ws_endpoint(ws: WebSocket) -> None:
     finally:
         manager.disconnect(ws, client_id)
         log_event("disconnected", client_id)
+
+
+# --- web client assets ------------------------------------------------------
+#
+# Serve the web client from this same app/port/origin as /ws, so the single node
+# (and single k8s Service) serves both — no second service, no CORS.
+#
+# STUB: today static/ holds only a placeholder page (see static/index.html). The
+# mount is guarded on the dir existing so the WS-only paths (uv run, compose dev)
+# still boot if it's absent. It's registered AFTER /ws and /healthz because a
+# mount at "/" is greedy and would otherwise shadow them.
+STATIC_DIR = Path(__file__).parent / "static"
+if STATIC_DIR.is_dir():
+    # TODO(vite): once a local `vite build` emits hashed assets, also mount them:
+    #   app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+    # and add an SPA deep-link fallback (a catch-all GET returning index.html)
+    # declared BELOW /ws and /healthz so those keep priority.
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 
 if __name__ == "__main__":
