@@ -114,39 +114,6 @@ Bypass it for a work-in-progress branch with `git push --no-verify`.
 If a broken commit is pushed this way, however, it will not make its way to the public deployment
 since CI runs the same error check and will not continue rollout on error.
 
-## (Re)creating the deployment env in UpCloud
-
-The project deploys to a managed kubernetes cluster in Finish cloud provider UpCloud. The cluster itself is ephemeral and can
-be quickly recreated, in that case these are the steps taken:
-
-- In Upcloud web console, delete current cluster if one exists. You may need to delete a dangling load balancer afterwards as well.
-- Create a new cluster. Allow ip access for all ips, so that ingress works for github actions build pipeline.
-- After the cluster finishes creating, download its kubeconfig and save it at the
-  exact path the scripts expect:
-  `~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml`. It lives outside
-  the repo on purpose (cluster-admin creds — never in the working tree). This is
-  the only local copy; `deploy-upcloud.sh` / `logs-upcloud.sh` fall back to it
-  when `$KUBECONFIG` isn't already set.
-- A new cluster may get a new context name. If it changed, update `EXPECTED_CONTEXT` in **both** `scripts/deploy-upcloud.sh`
-  and `scripts/logs-upcloud.sh` to match (the scripts refuse to deploy unless the
-  context matches, as a guard against hitting the wrong cluster).
-- Point CI at the new cluster by re-setting the GitHub Actions secret CI reads its
-  kubeconfig from (the workflow writes it to a temp file at deploy time):
-  `gh secret set UPCLOUD_KUBECONFIG < ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml`
-- Deploy once to provision the app load balancer and learn its public hostname:
-  `./scripts/deploy-upcloud.sh`. It applies `k8s/timeline-server-upcloud.yaml`,
-  waits for the LB, and prints the client URL `wss://<lb-host>/ws`. (The LB
-  hostname is brand-new on a recreated cluster, and the API-server LB in the
-  kubeconfig is a separate one — use the hostname the script prints, not the one
-  in the kubeconfig.)
-- Update that new `wss://<lb-host>/ws` URL in the two parallel `SERVERS` lists
-  (the "Remote UpCloud" entry in each):
-  `app/client-python-qt/timeline_client.py` and `app/client-web/src/lib/servers.ts`.
-- Update any other references to the public https:// url with the updated domain
-- Run `./scripts/error_check.sh`, then commit.
-- Do some minor change and verify that a push of that change shows up in the public deploy/webapp after
-
-
 ## Present (and past) architecture
 
 Showing the evolution of the architecture in this repo.
@@ -413,60 +380,21 @@ developer machine — UpCloud pulls the published artifact straight from GHCR (i
 can, because the package is public), so `main` is the single source of truth for
 what runs remotely.
 
-```
-./scripts/deploy-upcloud.sh
-```
+Deploy with `./scripts/deploy-upcloud.sh` (or automatically via CI on every merge
+to `main`). The `Service` is a `LoadBalancer` with a stable public hostname, TLS
+terminated at the LB on a custom domain (`wss://tknilsson-sandbox.com/ws`),
+single-replica/`Recreate` like the minikube siblings. Each auto-rollout restarts
+the single in-memory-stateful pod, so clients drop and state resets on every
+deployed push.
 
-It pins every `kubectl` call to the UpCloud kubeconfig so it can never touch a
-local context by accident, asserts it's aimed at the expected cluster, applies
-`k8s/timeline-server-upcloud.yaml`, forces a rollout (so the freshest `:latest`
-is pulled), waits for readiness, then waits for the load balancer's public
-hostname and prints the client URL.
+Detail lives in [`docs/`](docs/) ([map](docs/README.md)):
 
-**Kubeconfig (cluster-admin creds — kept out of the repo).** The script reads the
-UpCloud kubeconfig from `$KUBECONFIG` if set, otherwise from a file kept **outside
-the repo** at `~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml`. It is
-never in the working tree, so it can't be committed. CI gets the same kubeconfig
-from the **`UPCLOUD_KUBECONFIG`** Actions secret — the workflow writes it to a temp
-file and exports `KUBECONFIG` before calling the script. One-time setup: add the
-secret with the file's contents under *Settings → Secrets and variables → Actions →
-New repository secret* (or
-`gh secret set UPCLOUD_KUBECONFIG < ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml`).
-
-The UpCloud manifest is the public-remote sibling of the minikube ones — same
-single-replica/`Recreate` rules and the same GHCR image — with three deliberate
-differences for a real cluster:
-
-- **`Service` type `LoadBalancer`** (not `NodePort`). UpCloud's cloud controller
-  provisions a managed load balancer with its own stable public hostname,
-  forwarding both `443` and `80` to the container's `8000`, so the client
-  connects at `wss://<lb-host>/ws` from anywhere. The load balancer is
-  provisioned **once** and persists with a fixed hostname across redeploys —
-  re-running the script just re-applies and rolls out, it does not create a new
-  one. (It only goes away, and the hostname changes, if you delete the `Service`:
-  `kubectl --kubeconfig ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml delete -f k8s/timeline-server-upcloud.yaml`
-  — which also stops the load balancer's running cost.)
-- **TLS terminated at the load balancer.** The `Service` carries a
-  `service.beta.kubernetes.io/upcloud-load-balancer-config` annotation putting
-  the `443` frontend in `http` mode. Per UpCloud's load balancer docs, an
-  http-mode frontend on `443` with no `tls_config` triggers **auto-TLS**: UpCloud
-  provisions and renews a managed certificate for the `lb-*.upcloudlb.com`
-  hostname automatically — no cert files in the repo. http mode (vs raw `tcp`) is
-  also what lets the LB handle the WebSocket upgrade, so the secure client URL is
-  `wss://<lb-host>/ws`. Plain `:80` is kept alongside for `curl`/healthz checks.
-- **`imagePullPolicy: Always`.** Unlike minikube (image pre-pulled, so
-  `IfNotPresent`/`Never`), this cluster pulls from GHCR over the internet, so a
-  rollout restart always lands the newest `:latest`.
-
-This deploy is also wired into CI for true continuous deployment: after the
-build-and-push job publishes a new `:latest`, a `deploy-upcloud` job in the same
-workflow runs `scripts/deploy-upcloud.sh` against the cluster, forcing the
-rollout that pulls the new image. Without that step nothing would update on its own — `imagePullPolicy:
-Always` only re-pulls when a pod is *created*; nothing polls GHCR. The job is
-gated to `main` and serialized so two quick pushes don't race rollouts. You can
-still run `deploy-upcloud.sh` by hand for an out-of-band deploy. Note the trade-
-off: each auto-rollout restarts the single, in-memory-stateful pod, so connected
-clients drop and state resets on every deployed push to `main`.
+- **[`upcloud-deployment.md`](docs/upcloud-deployment.md)** — the deploy script,
+  kubeconfig handling, manifest differences, and the CI continuous-deployment wiring.
+- **[`upcloud-create-cluster.md`](docs/upcloud-create-cluster.md)** — standing up or
+  recreating the ephemeral cluster from scratch.
+- **[`upcloud-custom-domain-tls.md`](docs/upcloud-custom-domain-tls.md)** — the custom
+  domain + HTTPS/WSS cert (and the CCM gotcha behind it).
 
 ```mermaid
 flowchart TB

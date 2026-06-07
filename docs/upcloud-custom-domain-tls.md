@@ -1,5 +1,14 @@
 # Custom domain + TLS on the UpCloud load balancer
 
+> **TL;DR**
+> 1. **DNS** — DNSimple **ALIAS** `tknilsson-sandbox.com` → `lb-…upcloudlb.com` (the LB hostname).
+> 2. **Cert** — create an UpCloud **dynamic** certificate bundle for the domain (auto-issued + auto-renewed, ZeroSSL DV). Copy its UUID.
+> 3. **Attach by UUID in the annotation** — put `certificate_bundle_uuid` in the `443` frontend's `tls_configs` in `k8s/timeline-server-upcloud.yaml`, then `./scripts/deploy-upcloud.sh`. **Never attach in the Hub** — the CCM overwrites manual attaches on *every* reconcile (verified: stripped in ~12s).
+> 4. **Verify** — `openssl s_client -connect tknilsson-sandbox.com:443 -servername tknilsson-sandbox.com </dev/null 2>/dev/null | openssl x509 -noout -subject` → `CN=tknilsson-sandbox.com`.
+> 5. **On LB/cluster recreate** — the bundle UUID is new: re-point the ALIAS, recreate the bundle, update the UUID in the manifest, redeploy. That one-line UUID edit is the only recurring touch.
+>
+> Current bundle UUID: `0a1fe407-5173-4754-892b-afa6386c5a7f` (DNSimple-issued Let's Encrypt certs are **not** used by this setup).
+
 How to serve the timeline server on a custom domain over HTTPS/WSS, with a cert
 that **survives Kubernetes CCM reconciliation**. The cert is an UpCloud-issued
 **dynamic** bundle (auto-issued, auto-renewed by UpCloud — ZeroSSL DV), and it's
@@ -73,8 +82,8 @@ annotation by UUID** so the CCM keeps it attached.
 The bundle is an UpCloud resource that *persists* across reconciles (only its
 *attachment* to the frontend is what the CCM manages). Create it once:
 
-1. Hub → your Load Balancer → **Certificates / certificate bundles**.
-2. Create a **Dynamic** bundle; set its domain/hostname to
+1. Hub → your Load Balancer → Frontends → **Certificates**.
+2. Create a **Dynamic** certificate; set its domain/hostname to
    **`tknilsson-sandbox.com`** (add `www.tknilsson-sandbox.com` too if you want
    www — see "Adding www"). Key type ECDSA is fine.
 3. Because DNS already points the domain at the LB, UpCloud validates ownership
