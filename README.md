@@ -514,14 +514,11 @@ the web client is an additional front end, not yet a replacement.
 
 ### Next steps
 
-DNS: Figure out how to point a durable DNS address towards upcloud load balancer.
-(Update cookbook on what to do there if cluster recreated)
-
 Persistence: postgres as base case. Postgres container locally, managed postgres in upcloud deployment
 Super simple sql query/update example pattern/example from python server, no orm
 
 Serverside streaming: feed/consume kafka and/or time series db, make the serve as adapter/mediator between that and gui client
 
 More interesting/concrete domain: find something fun to visualize and stream. Weather data? Public energy sector data?
-
-Add unit test suites to QA guardrails. Unit+api integration serverside, e2e playwright clientside. CI should run test suites.
+When making the featureset something interesting, also add unit test suites to QA guardrails. 
+Unit+api integration serverside, e2e playwright clientside. CI should run test suites.
