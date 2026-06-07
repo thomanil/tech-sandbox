@@ -31,7 +31,7 @@ _After a few iterations we had a separate observable server that handles state c
 
 https://github.com/user-attachments/assets/0e8a17b8-b236-47f1-a588-66745e5aa157
 
-_In the final iteration (for now) we have a public api + hosted webapp client both being hosted from a kubernetes service behind a public web url:_
+_In the final iteration (for now) we have a public api + hosted webapp client both being hosted from a kubernetes service behind a public web url, where a clients timeline state is persisted and survives kubernetes rollouts/restarts:_
 
 https://github.com/user-attachments/assets/cf995f77-71ce-4fcc-b31b-7cdfcdd83d69
 
