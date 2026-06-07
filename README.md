@@ -114,6 +114,44 @@ Bypass it for a work-in-progress branch with `git push --no-verify`.
 If a broken commit is pushed this way, however, it will not make its way to the public deployment
 since CI runs the same error check and will not continue rollout on error.
 
+## (Re)creating the deployment env in UpCloud
+
+The project deploys to a managed kubernetes cluster in Finish cloud provider UpCloud. The cluster itself is ephemeral and can
+be quickly recreated, in that case these are the steps taken:
+
+- In Upcloud web console, delete current cluster if one exists. You may need to delete a dangling load balancer afterwards as well.
+- Create a new cluster. Allow ip access for all ips, so that ingress works for github actions build pipeline.
+- After the cluster finishes creating, download its kubeconfig and save it at the
+  exact path the scripts expect:
+  `~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml`. It lives outside
+  the repo on purpose (cluster-admin creds — never in the working tree). This is
+  the only local copy; `deploy-upcloud.sh` / `logs-upcloud.sh` fall back to it
+  when `$KUBECONFIG` isn't already set.
+- A new cluster gets a new context name. Read it with
+  `KUBECONFIG=~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml kubectl config current-context`
+  and, if it changed, update `EXPECTED_CONTEXT` in **both** `scripts/deploy-upcloud.sh`
+  and `scripts/logs-upcloud.sh` to match (the scripts refuse to deploy unless the
+  context matches, as a guard against hitting the wrong cluster).
+- Point CI at the new cluster by re-setting the GitHub Actions secret CI reads its
+  kubeconfig from (the workflow writes it to a temp file at deploy time):
+  `gh secret set UPCLOUD_KUBECONFIG < ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml`
+- Deploy once to provision the app load balancer and learn its public hostname:
+  `./scripts/deploy-upcloud.sh`. It applies `k8s/timeline-server-upcloud.yaml`,
+  waits for the LB, and prints the client URL `wss://<lb-host>/ws`. (The LB
+  hostname is brand-new on a recreated cluster, and the API-server LB in the
+  kubeconfig is a separate one — use the hostname the script prints, not the one
+  in the kubeconfig.)
+- Update that new `wss://<lb-host>/ws` URL in the two parallel `SERVERS` lists
+  (the "Remote UpCloud" entry in each):
+  `app/client-python-qt/timeline_client.py` and `app/client-web/src/lib/servers.ts`.
+- Run `./scripts/error_check.sh`, then commit.
+
+Note: deleting the old cluster is what actually invalidates its leaked kubeconfig
+— the old admin cert is signed by a CA that no longer exists and points at a
+torn-down API-server LB, so it's both untrusted and unreachable. No git-history
+scrub of the old cert is needed.
+
+
 ## Present (and past) architecture
 
 Showing the evolution of the architecture in this repo.
