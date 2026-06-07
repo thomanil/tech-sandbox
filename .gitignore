@@ -6,7 +6,8 @@
 /app/server-python/static/
 /app/server-python/__pycache__/
 
-# UpCloud cluster kubeconfig — holds cluster-admin creds. Kept on disk for local
-# deploys (scripts/deploy-upcloud.sh, logs-upcloud.sh) but never committed; CI
-# reads it from the UPCLOUD_KUBECONFIG Actions secret instead.
-/k8s/upcloud_timeline-public_kubeconfig.yaml
+# UpCloud cluster kubeconfig — holds cluster-admin creds. It lives OUTSIDE the
+# repo (~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml) for local
+# deploys; CI reads it from the UPCLOUD_KUBECONFIG Actions secret. This defensive
+# glob just guards against ever dropping a kubeconfig into the working tree.
+*kubeconfig*.yaml

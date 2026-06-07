@@ -9,7 +9,7 @@
 # Like deploy-upcloud.sh, every kubectl call is pinned to the UpCloud kubeconfig
 # via KUBECONFIG, so this never tails whatever your default kubectl context
 # happens to be (e.g. a local minikube). It honors an already-set KUBECONFIG and
-# otherwise falls back to the local, gitignored copy. It also asserts the
+# otherwise falls back to the local out-of-repo copy. It also asserts the
 # expected cluster context before streaming.
 #
 # Caveat: a follow is bound to a single pod. A deploy (deploy-upcloud.sh, or the
@@ -22,8 +22,8 @@ set -euo pipefail
 # Run from the repo root regardless of where the script is invoked from.
 cd "$(dirname "$0")/.."
 
-DEFAULT_KUBECONFIG_FILE="$PWD/k8s/upcloud_timeline-public_kubeconfig.yaml"
-EXPECTED_CONTEXT="kubernetes-admin@timeline-public"
+DEFAULT_KUBECONFIG_FILE="$HOME/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml"
+EXPECTED_CONTEXT="kubernetes-admin@tech-sandbox-upcloud-k8s-cluster"
 
 # --- Preflight: required tooling and config --------------------------------
 if ! command -v kubectl >/dev/null 2>&1; then
@@ -32,7 +32,7 @@ if ! command -v kubectl >/dev/null 2>&1; then
 fi
 
 # Honor a KUBECONFIG supplied by the environment; otherwise fall back to the
-# local, gitignored copy. Either way pin kubectl to the UpCloud cluster.
+# local out-of-repo copy. Either way pin kubectl to the UpCloud cluster.
 if [[ -z "${KUBECONFIG:-}" ]]; then
   if [[ ! -f "$DEFAULT_KUBECONFIG_FILE" ]]; then
     echo "No KUBECONFIG set and $DEFAULT_KUBECONFIG_FILE not found." >&2

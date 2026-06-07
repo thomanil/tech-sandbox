@@ -20,9 +20,9 @@
 # changing anything.
 #
 # Where the kubeconfig comes from:
-#   - Locally, from a gitignored file at k8s/upcloud_timeline-public_kubeconfig.yaml
-#     that you keep on disk (it is no longer committed — it holds cluster-admin
-#     creds).
+#   - Locally, from a file kept OUTSIDE the repo at
+#     ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml (it holds
+#     cluster-admin creds, so it never lives in the working tree).
 #   - In CI, the workflow writes the UPCLOUD_KUBECONFIG secret to a temp file and
 #     exports KUBECONFIG before calling this script; we honor an already-set
 #     KUBECONFIG and skip the local-file fallback.
@@ -32,9 +32,9 @@ set -euo pipefail
 # Run from the repo root regardless of where the script is invoked from.
 cd "$(dirname "$0")/.."
 
-DEFAULT_KUBECONFIG_FILE="$PWD/k8s/upcloud_timeline-public_kubeconfig.yaml"
+DEFAULT_KUBECONFIG_FILE="$HOME/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml"
 MANIFEST="k8s/timeline-server-upcloud.yaml"
-EXPECTED_CONTEXT="kubernetes-admin@timeline-public"
+EXPECTED_CONTEXT="kubernetes-admin@tech-sandbox-upcloud-k8s-cluster"
 
 # --- Preflight: required tooling and config --------------------------------
 if ! command -v kubectl >/dev/null 2>&1; then
@@ -43,7 +43,7 @@ if ! command -v kubectl >/dev/null 2>&1; then
 fi
 
 # Honor a KUBECONFIG supplied by the environment (CI); otherwise fall back to the
-# local, gitignored copy. Either way every kubectl call below is pinned to the
+# local out-of-repo copy. Either way every kubectl call below is pinned to the
 # UpCloud cluster, never the user's default context.
 if [[ -z "${KUBECONFIG:-}" ]]; then
   if [[ ! -f "$DEFAULT_KUBECONFIG_FILE" ]]; then

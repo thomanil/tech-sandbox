@@ -22,7 +22,7 @@ export const SERVERS: Record<string, string | null> = {
   // docker driver). Update it if you recreate the cluster.
   'Local minikube (deploy-minikube.sh)': 'ws://192.168.49.2:30080/ws',
   // TLS-terminated at the UpCloud LB's 443 frontend, so wss:// on the default port.
-  'Remote UpCloud': 'wss://lb-0acd94799dc24f208d245ba808d7fdbe-1.upcloudlb.com/ws',
+  'Remote UpCloud': 'wss://lb-0a473f0a3c4c4d3ba2adf3e8c27c2470-1.upcloudlb.com/ws',
 }
 
 // Shipped build → the serving origin; local dev → the Local docker backend.

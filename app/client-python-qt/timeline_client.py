@@ -46,7 +46,7 @@ SERVERS = {
     # TLS-terminated at the UpCloud load balancer's 443 frontend (http mode,
     # auto-provisioned cert), so this is wss:// on the default 443 port — no
     # port in the URL. The plain-http :80 frontend still exists for healthz.
-    "Remote UpCloud": "wss://lb-0acd94799dc24f208d245ba808d7fdbe-1.upcloudlb.com/ws",
+    "Remote UpCloud": "wss://lb-0a473f0a3c4c4d3ba2adf3e8c27c2470-1.upcloudlb.com/ws",
 }
 DEFAULT_SERVER = "Local docker"
 

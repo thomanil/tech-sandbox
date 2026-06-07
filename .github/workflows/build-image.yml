@@ -16,7 +16,8 @@
 # kubeconfig stored as the UPCLOUD_KUBECONFIG repository secret: the job writes it
 # to a temp file and exports KUBECONFIG before running scripts/deploy-upcloud.sh.
 # (The kubeconfig holds cluster-admin creds, so it lives in Actions secrets — not
-# the repo. Locally the script falls back to a gitignored copy on disk.)
+# the repo. Locally the script falls back to a copy kept outside the repo at
+# ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml.)
 name: Build, push, and deploy server image
 
 on:

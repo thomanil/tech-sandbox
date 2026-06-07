@@ -391,14 +391,14 @@ is pulled), waits for readiness, then waits for the load balancer's public
 hostname and prints the client URL.
 
 **Kubeconfig (cluster-admin creds — kept out of the repo).** The script reads the
-UpCloud kubeconfig from `$KUBECONFIG` if set, otherwise from a local file at
-`k8s/upcloud_timeline-public_kubeconfig.yaml`. That file is **gitignored**: keep
-your copy on disk for local deploys, but it is never committed. CI gets the same
-kubeconfig from the **`UPCLOUD_KUBECONFIG`** Actions secret — the workflow writes
-it to a temp file and exports `KUBECONFIG` before calling the script. One-time
-setup: add the secret with the file's contents under *Settings → Secrets and
-variables → Actions → New repository secret* (or
-`gh secret set UPCLOUD_KUBECONFIG < k8s/upcloud_timeline-public_kubeconfig.yaml`).
+UpCloud kubeconfig from `$KUBECONFIG` if set, otherwise from a file kept **outside
+the repo** at `~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml`. It is
+never in the working tree, so it can't be committed. CI gets the same kubeconfig
+from the **`UPCLOUD_KUBECONFIG`** Actions secret — the workflow writes it to a temp
+file and exports `KUBECONFIG` before calling the script. One-time setup: add the
+secret with the file's contents under *Settings → Secrets and variables → Actions →
+New repository secret* (or
+`gh secret set UPCLOUD_KUBECONFIG < ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml`).
 
 The UpCloud manifest is the public-remote sibling of the minikube ones — same
 single-replica/`Recreate` rules and the same GHCR image — with three deliberate
@@ -411,7 +411,7 @@ differences for a real cluster:
   provisioned **once** and persists with a fixed hostname across redeploys —
   re-running the script just re-applies and rolls out, it does not create a new
   one. (It only goes away, and the hostname changes, if you delete the `Service`:
-  `kubectl --kubeconfig k8s/upcloud_timeline-public_kubeconfig.yaml delete -f k8s/timeline-server-upcloud.yaml`
+  `kubectl --kubeconfig ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml delete -f k8s/timeline-server-upcloud.yaml`
   — which also stops the load balancer's running cost.)
 - **TLS terminated at the load balancer.** The `Service` carries a
   `service.beta.kubernetes.io/upcloud-load-balancer-config` annotation putting
