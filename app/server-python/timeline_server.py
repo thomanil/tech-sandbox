@@ -4,9 +4,12 @@
 #     "fastapi==0.115.6",
 #     "uvicorn[standard]==0.34.0",
 #     "psycopg[binary]==3.3.4",
-#     "yoyo-migrations==9.0.0",
+#     "psycopg-pool==3.3.1",
 # ]
 # ///
+#
+# Migrations are run by dbmate, a single static Go binary baked into the image
+# (see Dockerfile) — not a Python dependency.
 
 """WebSocket state server for the timeline app.
 
@@ -19,10 +22,11 @@ orchestration (Docker/k8s), and (when present) the static/ dir — the Vite buil
 the web client (app/client-web) — is served at / as the web client, same app,
 port, and origin as /ws.
 
-On startup the server applies any pending database migrations (yoyo-migrations)
-against DATABASE_URL; see run_migrations() below. DATABASE_URL is a single libpq
-conninfo string so the same code talks to the local compose Postgres and the
-remote managed one transparently (only its sslmode differs); unset means "no DB".
+On startup the server applies any pending database migrations (via dbmate, a small
+static binary baked into the image) against DATABASE_URL; see run_migrations()
+below. DATABASE_URL is a single libpq conninfo string so the same code talks to the
+local compose Postgres and the remote managed one transparently (only its sslmode
+differs); unset means "no DB".
 
 Bind host/port come from the HOST/PORT env vars (default 127.0.0.1:8000) so the
 container can publish on 0.0.0.0 without code changes; see Dockerfile.
@@ -35,18 +39,18 @@ never truly parallel, so the shared `model`/`playing` state needs no locks.
 import asyncio
 import logging
 import os
-import re
+import subprocess
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import psycopg
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from psycopg.types.json import Jsonb
+from psycopg_pool import AsyncConnectionPool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
-from yoyo import get_backend, read_migrations
 
 from timeline_model import SEQUENCES, TICKS_PER_SECOND, TimelineModel
 
@@ -209,100 +213,201 @@ async def ticker() -> None:
             if state.playing:
                 state.model.step_forward()
                 await manager.send_to_client(client_id, state_message(state))
+                persist_state_bg(client_id, state)  # fire-and-forget, per design
 
 
-# --- database: startup migrations + readiness ping --------------------------
+# --- database: startup migrations + state persistence -----------------------
 #
 # DB access is transparent: the server reads a single DATABASE_URL (a libpq
 # conninfo string) and behaves identically everywhere — the only per-environment
 # difference is the sslmode token inside that string (disable for the local
 # compose/minikube Postgres, require for UpCloud's managed, TLS-enforcing one).
-# Unset DATABASE_URL means "no DB" — the server still boots (quick `uv run` dev).
+# Unset DATABASE_URL means "no DB" — the server still boots (quick `uv run` dev)
+# and simply doesn't persist anything.
+#
+# When a DB IS configured, per-client model state is persisted to
+# timeline.client_state so clients resume after a pod restart/redeploy: the state
+# is loaded back into `states` on startup, and written through on every change
+# (fire-and-forget, so a tick/command never waits on the DB). The in-process
+# `states` dict stays the source of truth at runtime; the table is its durable
+# mirror. (This does NOT make the server horizontally scalable — two replicas
+# would each load all rows and clobber each other's writes; the single-replica /
+# Recreate rule still holds. Persistence is for restart-resume, not scale-out.)
 
 MIGRATIONS_DIR = Path(__file__).parent / "db" / "migrations"
 
-
-def _yoyo_url(dsn: str) -> str:
-    """yoyo picks its driver by URL scheme; pin it to psycopg 3 (the same driver
-    the app uses for /readyz) via postgresql+psycopg:// so we never pull in
-    psycopg2. Handles both postgres:// (UpCloud) and postgresql:// (compose,
-    minikube); libpq query params like sslmode ride along to psycopg unchanged."""
-    return re.sub(r"^postgres(ql)?://", "postgresql+psycopg://", dsn, count=1)
+# Connection pool for state load/persist, opened in lifespan when DATABASE_URL is
+# set (None otherwise). A pool — not one shared connection — because the
+# fire-and-forget persist writes can overlap, and it transparently reconnects if
+# the DB bounces. Reused by /readyz to reflect real DB+pool health.
+pool: AsyncConnectionPool | None = None
 
 
 def run_migrations() -> None:
-    """Apply pending DB migrations at startup, logging loudly what it does.
+    """Apply pending DB migrations at startup with dbmate, logging what it does.
 
-    Synchronous (yoyo is sync), but this runs ONCE during lifespan startup —
-    before the ticker starts and before we accept any connection — so it never
-    blocks live request handling and needs no thread (the single-event-loop /
-    no-locks model is preserved). Connecting to apply migrations doubles as the
-    "is the DB reachable?" check, so there's no separate startup ping.
+    dbmate is a single static Go binary baked into the image (see Dockerfile). It
+    reads plain SQL up/down migrations from MIGRATIONS_DIR, tracks applied versions
+    in a `schema_migrations` table, and guards concurrent runs with a Postgres
+    advisory lock (auto-released on disconnect — no stale locks). It speaks the same
+    DATABASE_URL (a libpq postgres:// URL) the app uses, so nothing is translated:
+    local `sslmode=disable` vs UpCloud `sslmode=require` just rides along.
 
-    Driven solely by DATABASE_URL: unset -> skip and boot. Set but unreachable or
-    a failing migration -> raise, aborting startup so the pod CrashLoops until
-    it's fixed, rather than serving on a missing/half-applied schema.
+    Synchronous, but runs ONCE during lifespan startup — before the ticker and
+    before we accept any connection — so it never blocks live request handling.
+    Driven solely by DATABASE_URL: unset -> skip and boot. A failing migration or
+    unreachable DB exits non-zero -> we raise, aborting startup so the pod
+    CrashLoops until it's fixed, rather than serving on a bad/half-applied schema.
 
-    Concurrency: yoyo takes a lock (a single-row yoyo_lock table) before applying;
-    a concurrent starter retries ~0.5s for up to 10s, then raises LockTimeout. See
-    db/migrations/README.md for the full locking story (and `yoyo break-lock`).
+    `migrate` (not `up`) applies pending migrations without trying to CREATE the
+    database — the database always already exists (compose / UpCloud managed), and
+    creating it may need privileges the app role lacks. `--no-dump-schema` skips
+    writing a schema.sql dump, which we don't use at runtime.
+
+    `--migrations-table public.schema_migrations` pins dbmate's bookkeeping table to
+    public explicitly. Without the schema qualifier, the unqualified `schema_migrations`
+    resolves via the default search_path (`"$user",public`); when the DB user shares a
+    name with a schema a migration creates (locally: user `timeline` + schema
+    `timeline`), the unqualified name starts resolving to that schema mid-run and the
+    insert fails ("timeline.schema_migrations does not exist"). Qualifying it avoids
+    the collision in every environment.
     """
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
         logger.info("DATABASE_URL not set; skipping database migrations")
         return
-    logger.info(
-        "MIGRATIONS: applying pending migrations from %s (yoyo)", MIGRATIONS_DIR
-    )
-    logger.info(
-        "MIGRATIONS: initializing yoyo bookkeeping — any 'already exists' / "
-        "'does not exist' ERROR lines logged by Postgres during this step are yoyo "
-        "probing its own tables (it doesn't use CREATE IF NOT EXISTS); they are "
-        "expected and harmless, not migration failures"
-    )
+    logger.info("MIGRATIONS: running dbmate migrate (from %s)", MIGRATIONS_DIR)
     try:
-        backend = get_backend(_yoyo_url(dsn))
-        migrations = read_migrations(str(MIGRATIONS_DIR))
-        with backend.lock():  # default 10s lock timeout
-            pending = backend.to_apply(migrations)
-            logger.info(
-                "MIGRATIONS: %d known, %d pending", len(migrations), len(pending)
-            )
-            for migration in pending:
-                logger.info("MIGRATIONS: applying %s", migration.id)
-            backend.apply_migrations(pending)
-        if pending:
-            logger.info(
-                "MIGRATIONS: done — applied %d migration(s); schema up to date",
-                len(pending),
-            )
-        else:
-            logger.info("MIGRATIONS: done — nothing pending, schema already up to date")
-    except Exception:
-        logger.exception("MIGRATIONS: FAILED — aborting startup")
+        result = subprocess.run(
+            [
+                "dbmate",
+                "--migrations-dir",
+                str(MIGRATIONS_DIR),
+                "--migrations-table",
+                "public.schema_migrations",
+                "--no-dump-schema",
+                "migrate",
+            ],
+            env={**os.environ, "DATABASE_URL": dsn},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        logger.error(
+            "MIGRATIONS: dbmate binary not found on PATH — aborting startup "
+            "(it's baked into the image; for a bare `uv run` with a DB, install dbmate)"
+        )
         raise
+    except subprocess.CalledProcessError as exc:
+        for line in (exc.stdout + exc.stderr).splitlines():
+            if line.strip():
+                logger.error("MIGRATIONS: %s", line.rstrip())
+        logger.error(
+            "MIGRATIONS: FAILED (dbmate exit %s) — aborting startup", exc.returncode
+        )
+        raise
+    for line in (result.stdout + result.stderr).splitlines():
+        if line.strip():
+            logger.info("MIGRATIONS: %s", line.rstrip())
+    logger.info("MIGRATIONS: done — schema up to date")
 
 
-async def ping_database(dsn: str, *, timeout: float = 2) -> None:
-    """Open a connection and run SELECT 1; raise on failure. Async (psycopg's
-    AsyncConnection) so the /readyz probe never blocks the event loop — never the
-    sync psycopg.connect."""
-    async with await psycopg.AsyncConnection.connect(
-        dsn, connect_timeout=timeout
-    ) as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("SELECT 1")
-            await cur.fetchone()
+async def open_state_pool() -> None:
+    """Open the state connection pool and load any persisted client models back
+    into `states`, so clients reconnecting after a restart resume where they left
+    off. No-op when DATABASE_URL is unset (no DB → no persistence)."""
+    global pool
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        return
+    pool = AsyncConnectionPool(dsn, min_size=1, max_size=4, open=False)
+    await pool.open(wait=True, timeout=10)
+    await load_state()
+
+
+async def close_state_pool() -> None:
+    global pool
+    if pool is not None:
+        await pool.close()
+        pool = None
+
+
+async def load_state() -> None:
+    """Repopulate `states` from timeline.client_state on startup."""
+    if pool is None:
+        return
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT client_id, sequence_name, indices, playing FROM timeline.client_state"
+        )
+        rows = await cur.fetchall()
+    for client_id, sequence_name, indices, playing in rows:
+        states[client_id] = ClientState(
+            model=TimelineModel.from_snapshot(
+                {"sequence_name": sequence_name, "indices": indices}
+            ),
+            playing=playing,
+        )
+    logger.info(
+        "STATE: loaded %d persisted client model(s) from the database", len(rows)
+    )
+
+
+async def persist_state(client_id: int, state: ClientState) -> None:
+    """Upsert one client's current model + play flag. Errors are logged, never
+    raised — a failed persist must not take down the live session."""
+    if pool is None:
+        return
+    snap = state.model.snapshot()
+    try:
+        async with pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO timeline.client_state
+                    (client_id, sequence_name, indices, playing, updated_at)
+                VALUES (%s, %s, %s, %s, now())
+                ON CONFLICT (client_id) DO UPDATE SET
+                    sequence_name = EXCLUDED.sequence_name,
+                    indices       = EXCLUDED.indices,
+                    playing       = EXCLUDED.playing,
+                    updated_at    = now()
+                """,
+                (
+                    client_id,
+                    snap["sequence_name"],
+                    Jsonb(snap["indices"]),
+                    state.playing,
+                ),
+            )
+    except Exception:
+        logger.exception("STATE: failed to persist client %s", client_id)
+
+
+# Hold strong refs to in-flight fire-and-forget tasks so they aren't GC'd mid-write.
+_persist_tasks: set[asyncio.Task] = set()
+
+
+def persist_state_bg(client_id: int, state: ClientState) -> None:
+    """Fire-and-forget persist: schedule the upsert and return immediately so a
+    tick or command never waits on the DB (per design). No-op without a DB."""
+    if pool is None:
+        return
+    task = asyncio.create_task(persist_state(client_id, state))
+    _persist_tasks.add(task)
+    task.add_done_callback(_persist_tasks.discard)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_migrations()  # fatal if DATABASE_URL set & DB unreachable / migration fails
+    await open_state_pool()  # open pool + load persisted client state
     task = asyncio.create_task(ticker())
     try:
         yield
     finally:
         task.cancel()
+        await close_state_pool()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -335,6 +440,7 @@ async def handle_command(client_id: int, msg: dict) -> None:
         return  # unknown action -> no state change, no send
     log_event(action, client_id)
     await manager.send_to_client(client_id, state_message(state))
+    persist_state_bg(client_id, state)  # write the change through (fire-and-forget)
 
 
 @app.get("/healthz")
@@ -347,15 +453,17 @@ async def healthz() -> dict:
 
 @app.get("/readyz")
 async def readyz() -> dict:
-    """Readiness probe: the process is up AND (when DATABASE_URL is set) Postgres
-    is reachable. Returns 503 if the DB is down so k8s pulls the pod out of the
-    load balancer — without killing it (that's liveness/healthz's job). Logs
+    """Readiness probe: the process is up AND (when a DB is configured) Postgres is
+    reachable via the pool. Returns 503 if the DB is down so k8s pulls the pod out
+    of the load balancer — without killing it (that's liveness/healthz's job). Logs
     loudly on failure so the cause is obvious in `kubectl logs`."""
-    dsn = os.environ.get("DATABASE_URL")
-    if not dsn:
+    if pool is None:
         return {"status": "ready", "db": "not configured"}
     try:
-        await ping_database(dsn, timeout=2)  # under the probe's timeoutSeconds
+        # Short checkout timeout so a down DB fails the probe well under its
+        # timeoutSeconds rather than hanging.
+        async with pool.connection(timeout=2) as conn:
+            await conn.execute("SELECT 1")
     except Exception as exc:
         logger.error("READINESS FAILED: database unreachable: %s", exc)
         raise HTTPException(status_code=503, detail="database unreachable")
@@ -377,6 +485,10 @@ async def ws_endpoint(ws: WebSocket) -> None:
     await manager.connect(ws, client_id)
     state = get_state(client_id)  # born here so it shows in the roster below
     log_event("reconnected" if known else "connected", client_id)
+    if not known:
+        # Record a brand-new client so it's recognized as "reconnected" (and
+        # resumes its default-but-present state) after a pod restart.
+        persist_state_bg(client_id, state)
     try:
         # Initial full state for this client (resumes prior state if seed is known).
         await ws.send_json(state_message(state))

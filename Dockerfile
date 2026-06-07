@@ -41,13 +41,21 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
+# dbmate: the migration tool the server runs on startup (timeline_server.run_migrations).
+# It's a single static Go binary, copied straight from the official multi-arch image
+# (arm64/amd64 both resolve) — no extra runtime, no Python dep. Digest-pinned for
+# reproducible builds; the readable tag is kept as documentation. To refresh:
+#   docker buildx imagetools inspect ghcr.io/amacneil/dbmate:2
+# (resolved 2026-06-07 from tag :2, dbmate v2.33.0).
+COPY --from=ghcr.io/amacneil/dbmate:2@sha256:cbdf9e3631ff1c70a8a7a0091437bdd63c8525407009c2541273ee19e6eebc9e \
+     /usr/local/bin/dbmate /usr/local/bin/dbmate
+
 # The server package is flattened into /app (timeline_server.py imports
 # timeline_model as a sibling module, so they must stay side by side).
 COPY app/server-python/timeline_model.py app/server-python/timeline_server.py ./
 
-# DB migrations, applied on startup by timeline_server.run_migrations() (and
-# reusable by a future one-shot migration Job from this same image). Lands at
-# /app/db/migrations. See app/server-python/db/migrations/README.md.
+# DB migrations, applied on startup by timeline_server.run_migrations() with dbmate.
+# Plain SQL up/down files; lands at /app/db/migrations. See its README.md.
 COPY app/server-python/db ./db
 
 # Web client assets: the Vite build output from the web-build stage above,

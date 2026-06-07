@@ -1,10 +1,12 @@
 # Database & persistence
 
 The persistence base case (README's eighth iteration): the server talks to Postgres
-the **same way in every environment**, driven by a single `DATABASE_URL`. Timeline
-state is still held in memory — the single-replica/`Recreate` rules are unchanged —
-so what this adds is the deployment plumbing, the migration machinery, and a DB the
-server connects to on startup.
+the **same way in every environment**, driven by a single `DATABASE_URL`. On startup
+it applies migrations and **loads each client's saved model state**, and at runtime
+it **writes that state through on every change**, so clients resume after a pod
+restart/redeploy. The in-process `states` dict is still the source of truth while
+running — Postgres is its durable mirror — and the single-replica/`Recreate` rule is
+unchanged (see "Persistence doesn't mean scale-out" below).
 
 > **Related:**
 > - Remote managed DB: provisioning + the password Secret → [`upcloud-postgres.md`](upcloud-postgres.md).
@@ -30,29 +32,64 @@ Because the local Postgres is published on the host's `:5432`, the minikube pods
 reach that **same** container via `host.minikube.internal` — so `docker compose up`
 must be running for a minikube deploy to come up.
 
-## Driver: psycopg 3
+## Drivers
 
-`psycopg[binary]` (psycopg 3) is libpq-native, so the connection string UpCloud
-hands you drops in verbatim and the `sslmode` token is honored straight from the URL
-— no code branch between local (`disable`) and remote (`require`). The binary wheel
-means no compiler or libpq on the slim image. yoyo (below) reuses this same driver
-via the `postgresql+psycopg://` scheme, so no psycopg2 is pulled in.
+The app's runtime DB access uses **psycopg 3** (`psycopg[binary]` + `psycopg-pool`):
+libpq-native, so the connection string UpCloud hands you drops in verbatim and the
+`sslmode` token is honored straight from the URL — no code branch between local
+(`disable`) and remote (`require`). The binary wheel means no compiler or libpq on
+the slim image.
+
+Migrations are run by **dbmate** (below), a separate single static Go binary — not a
+Python dependency.
 
 ## Migrations on startup
 
 On startup the server applies any pending migrations with
-[yoyo-migrations](https://ollycope.com/software/yoyo/) (plain versioned SQL, no ORM
-— a Flyway analogue) **before** it serves a request, so the schema is ready before
-traffic. See `run_migrations()` in `../app/server-python/timeline_server.py`.
+[dbmate](https://github.com/amacneil/dbmate) (a single static binary baked into the
+image; plain SQL up/down files) **before** it serves a request, so the schema is
+ready before traffic. `run_migrations()` in `../app/server-python/timeline_server.py`
+shells out to `dbmate migrate`.
 
-- It's **fatal**: a missing/unreachable DB or a failing migration aborts startup and
-  (in k8s) CrashLoops the pod, rather than serving on a bad/half-applied schema.
-- It's **loudly logged**: look for `MIGRATIONS: applying from …` →
-  `MIGRATIONS: N known, M pending` → `MIGRATIONS: done (M applied); schema up to
-  date`.
-- The migration set starts **empty** — this iteration settles the machinery (and its
-  concurrency/locking story, incl. what happens if multiple nodes migrate at once):
+- It's **fatal**: a missing/unreachable DB or a failing migration makes dbmate exit
+  non-zero, which aborts startup and (in k8s) CrashLoops the pod, rather than serving
+  on a bad/half-applied schema.
+- It's **logged**: look for `MIGRATIONS: running dbmate migrate …` → dbmate's own
+  `Applying:`/`Applied:` lines → `MIGRATIONS: done — schema up to date`.
+- dbmate uses the same `DATABASE_URL` the app does (no translation) and tracks
+  applied versions in a `schema_migrations` table; re-runs are no-ops.
+- Concurrency is handled by a **PostgreSQL advisory lock** that auto-releases on
+  disconnect (no stale-lock problem). Current migrations create the `timeline`
+  schema (`0001`) and the `timeline.client_state` table (`0002`). Conventions +
+  the full locking story are in
   [`../app/server-python/db/migrations/README.md`](../app/server-python/db/migrations/README.md).
+
+## Client state persistence
+
+So a client resumes after a pod restart/redeploy, each client's model state is
+mirrored to `timeline.client_state` (one row per `client_id` seed — the active
+sequence, every sequence's remembered position as JSONB, and the play flag).
+
+- **Load on startup.** After migrations, `open_state_pool()` loads every row back
+  into the in-memory `states` dict (`STATE: loaded N persisted client model(s)`), so
+  a client reconnecting with its seed picks up where it left off.
+- **Write-through, fire-and-forget.** State is upserted on every change — each tick
+  of a playing client, each command, and a new client's first connect — via
+  `persist_state_bg()`, which schedules the write and returns immediately. A
+  tick/command never waits on the DB, and a failed write is logged, never fatal.
+- **Connection pool.** Writes go through a small `psycopg-pool` `AsyncConnectionPool`
+  (opened in `lifespan`) rather than one shared connection, since fire-and-forget
+  writes can overlap; the pool also reconnects transparently if the DB bounces and
+  backs the `/readyz` check.
+
+### Persistence doesn't mean scale-out
+
+Persisting state does **not** make the server horizontally scalable. Two replicas
+would each load all rows on startup and then clobber each other's write-through
+updates (last-writer-wins, diverging in-memory state). State is still owned by one
+process; the table is a restart-resume mirror, not a shared store. So the
+`replicas: 1` + `Recreate` rule stands — scaling out would require making the DB
+(or another store) the live source of truth, not just a mirror.
 
 ## Health probes are split
 
@@ -64,30 +101,6 @@ than restart-loops:
 - **`GET /readyz`** (readiness, and the compose healthcheck) — pings the DB and
   returns **503** when it's down, logging a loud `READINESS FAILED: …` line. k8s
   then pulls the pod from the load balancer (clients rejected) without killing it.
-
-## Architecture
-
-```mermaid
-flowchart TB
-  subgraph local["💻 Local docker-compose"]
-    lsrv["timeline_server.py<br/>run_migrations() on startup<br/>/healthz (cheap) · /readyz (DB ping)"]
-    lpg[("postgres:18 container")]
-    lsrv -->|"DATABASE_URL (env, cleartext)<br/>sslmode=disable"| lpg
-  end
-
-  subgraph mk["☸️ Local minikube"]
-    msrv["timeline-server pod"]
-    msrv -->|"DATABASE_URL (manifest, cleartext)<br/>host.minikube.internal:5432<br/>sslmode=disable"| lpg
-  end
-
-  subgraph up["☁️ UpCloud"]
-    usrv["timeline-server pod"]
-    secret["k8s Secret timeline-db<br/>(password, out of band)"]
-    upg[("Managed Postgres 18<br/>(TLS-enforcing)")]
-    secret -->|"valueFrom secretKeyRef"| usrv
-    usrv -->|"DATABASE_URL<br/>sslmode=require"| upg
-  end
-```
 
 ## Operational notes
 
@@ -103,27 +116,3 @@ the pod never becomes `Ready` — the NodePort Service then has no endpoints and
 clients silently can't connect (even though startup migrations and `/healthz`
 succeed). The trailing dot makes the name a FQDN, so the resolver skips the search
 domains and resolves in ~0ms. Don't "tidy up" the dot.
-
-### Expected Postgres log noise on startup
-
-The server logs a heads-up right before this happens ("MIGRATIONS: initializing yoyo
-bookkeeping — any 'already exists' / 'does not exist' ERROR lines … are expected and
-harmless"), so the noise is framed in context. The detail:
-
-yoyo initializes its bookkeeping by *probing* — it runs plain statements wrapped in
-`try/except` rather than using `CREATE TABLE IF NOT EXISTS`. Postgres logs the failed
-statement at `ERROR` even though yoyo catches it, so two harmless lines appear on
-**every** startup once the tables exist:
-
-```
-ERROR: relation "yoyo_lock" already exists           -- create_lock_table() retries CREATE, catches it
-ERROR: table "yoyo_tmp_xxxxxxxxxx" does not exist     -- _check_transactional_ddl() probe (see below)
-```
-
-The second is yoyo *detecting transactional DDL*: it creates a temp table, rolls the
-transaction back (Postgres DDL is transactional, so the table vanishes), then tries
-to `DROP` it — the `DROP` failing with "does not exist" is exactly how it concludes
-DDL rolls back cleanly. Neither line is an error in our system; the authoritative
-signal is the `MIGRATIONS: done …` log line from the server. (There's no clean way to
-suppress them app-side, and raising Postgres' `log_min_messages` would hide real
-errors too, so they're left as-is.)

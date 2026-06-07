@@ -514,15 +514,17 @@ the web client is an additional front end, not yet a replacement.
 
 ### (Eighth iteration) Database persistence base case
 
-The first step toward persistence: wire the server to Postgres **transparently**.
-Timeline state is still in memory (so the single-replica/`Recreate` rules are
-unchanged) — what's new is the deployment plumbing and a database the server talks to
-the same way everywhere. It reads a single `DATABASE_URL` and never branches on
-environment: a `postgres:18` container locally (cleartext creds), the **same**
-container reused from minikube via `host.minikube.internal`, and a **managed
-Postgres 18** on UpCloud whose password lives in a k8s Secret. On startup it applies
-any pending migrations ([yoyo-migrations](https://ollycope.com/software/yoyo/), plain
-SQL, no ORM) before serving.
+Wire the server to Postgres **transparently** and persist client state across
+restarts. It reads a single `DATABASE_URL` and never branches on environment: a
+`postgres:18` container locally (cleartext creds), the **same** container reused from
+minikube via `host.minikube.internal`, and a **managed Postgres 18** on UpCloud whose
+password lives in a k8s Secret. On startup it applies any pending migrations (plain
+SQL up/down files, run by [dbmate](https://github.com/amacneil/dbmate) — a small
+static binary, no ORM) and loads each client's saved model, then mirrors that state
+back on every change. So a client reconnecting after a redeploy resumes where it left
+off. The in-memory state stays the source of truth at runtime, so the
+single-replica/`Recreate` rules are unchanged — Postgres is its durable mirror, not a
+shared live store.
 
 Run it locally — the dev server script now brings up Postgres too, and you'll see
 `MIGRATIONS: done …` in the logs:

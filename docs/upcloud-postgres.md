@@ -69,14 +69,12 @@ kubectl --kubeconfig ~/.secrets/...kubeconfig.yaml rollout restart deployment/ti
 ## How the server uses it
 
 On startup the server applies pending migrations against `DATABASE_URL`
-(`run_migrations()` in `app/server-python/timeline_server.py`, using
-[yoyo-migrations](https://ollycope.com/software/yoyo/)) before it serves any
-request. Connecting to migrate doubles as the "is the DB reachable?" check. The
+(`run_migrations()` in `app/server-python/timeline_server.py`, which shells out to
+[dbmate](https://github.com/amacneil/dbmate)) before it serves any request. The
 readiness probe (`GET /readyz`) re-checks reachability on every poll; the liveness
 probe (`GET /healthz`) stays cheap and DB-free, so a DB outage de-registers the pod
 from the load balancer without restart-looping it. Migration conventions and the
-concurrency/locking behavior (incl. `yoyo break-lock` for a stale lock) are
-documented in
+advisory-lock concurrency behavior are documented in
 [`../app/server-python/db/migrations/README.md`](../app/server-python/db/migrations/README.md).
 
 ## Verifying

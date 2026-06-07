@@ -33,16 +33,23 @@ Three deployables, one wire protocol:
 
 Key invariants to preserve:
 
-- **State is per-client and in-memory.** Each client generates a random integer
-  seed sent as `?client_id=` on the WebSocket URL; the server keeps one
-  `TimelineModel` + play flag per seed in `states: dict[int, ClientState]`. State
-  persists across reconnects (never evicted) and resets when the process dies.
+- **State is per-client; in-memory is the source of truth, Postgres is its mirror.**
+  Each client generates a random integer seed sent as `?client_id=` on the WebSocket
+  URL; the server keeps one `TimelineModel` + play flag per seed in
+  `states: dict[int, ClientState]` (never evicted). When a DB is configured, that
+  state is mirrored to `timeline.client_state` — loaded into `states` on startup and
+  written through fire-and-forget on every change (tick/command/new-connect) — so
+  clients resume after a process/pod restart. Without a DB it still works, just
+  resets on restart. `states` stays authoritative at runtime; the table is a
+  restart-resume mirror, NOT a shared live store (see the single-replica rule).
 - **Single asyncio event loop, no locks.** The WS handlers, the `ticker()` task,
   and broadcasts are cooperatively scheduled — never truly parallel — so shared
   state needs no locking. Don't introduce threads or blocking calls.
 - **Must never scale past one replica.** Because state is in-process, every k8s
   manifest is `replicas: 1` with a `Recreate` strategy. A second pod would keep
-  its own independent state. Horizontal scaling would require shared state first.
+  its own independent state — and DB persistence does NOT change this: two replicas
+  would each load all rows and clobber each other's write-through updates. Horizontal
+  scaling would require making the DB the live source of truth, not just a mirror.
 - **One message shape.** The server pushes `state_message()` on connect and every
   change; both clients render it. Changing the protocol means touching all three.
 - **Probes are split.** `GET /healthz` is the **liveness** probe — keep it cheap and
@@ -54,9 +61,12 @@ Key invariants to preserve:
   read by the server with no env branching: local compose Postgres / minikube →
   cleartext, `sslmode=disable`; UpCloud managed Postgres → a k8s Secret,
   `sslmode=require`. Unset means "no DB" and the server still boots. On startup it
-  applies pending migrations (yoyo-migrations, psycopg 3) and that's fatal on
-  failure. Migrations live in `app/server-python/db/migrations/` (baked into the
-  image; see its README for the concurrency/locking story).
+  applies pending migrations with **dbmate** (a single static Go binary baked into
+  the image; `run_migrations()` shells out to `dbmate migrate`), fatal on failure.
+  Migrations are plain SQL up/down files in `app/server-python/db/migrations/` (see
+  its README for format + the advisory-lock concurrency story). Client state is then
+  loaded from / written through to `timeline.client_state` via a `psycopg-pool`
+  pool (psycopg 3; writes are fire-and-forget, never block a tick/command).
 
 The server's three new-backend addresses live in **two parallel lists** that must
 be kept in sync when an environment changes: `SERVERS` in

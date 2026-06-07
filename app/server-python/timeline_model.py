@@ -90,3 +90,24 @@ class TimelineModel:
             self.value_at(i)
             for i in range(self.index - WINDOW_RADIUS, self.index + WINDOW_RADIUS + 1)
         ]
+
+    def snapshot(self) -> dict:
+        """A JSON-serializable view of the full model: the active sequence plus
+        every sequence's remembered position. Round-trips through from_snapshot()
+        for DB persistence (see timeline_server.persist_state)."""
+        return {"sequence_name": self.sequence_name, "indices": dict(self._indices)}
+
+    @classmethod
+    def from_snapshot(cls, data: dict) -> "TimelineModel":
+        """Rebuild a model from snapshot() output. Defensive: unknown sequence
+        names (e.g. one removed from SEQUENCES since the row was written) are
+        ignored, falling back to the default sequence, so an old persisted row can
+        never crash startup."""
+        model = cls()
+        for name, idx in (data.get("indices") or {}).items():
+            if name in SEQUENCES:
+                model._indices[name] = max(0, int(idx))
+        sequence_name = data.get("sequence_name")
+        if sequence_name in SEQUENCES:
+            model.set_sequence(sequence_name)
+        return model
