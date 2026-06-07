@@ -82,6 +82,35 @@ Dependencies are declared inline in each script (PEP 723), so `uv` installs
 them into an ephemeral env on first run — no separate `pip install` step
 needed.
 
+## Quality checks
+
+Static guardrails covering both halves of the codebase:
+
+```
+./scripts/error_check.sh                # read-only: report problems, exit non-zero on any failure
+./scripts/autofix_lint_formatting.sh    # apply the fixable lint/formatting subset in place
+```
+
+- **`error_check.sh`** type-checks (`tsc -b`) and lints (`eslint .`) the web
+  client, and for Python compiles every module (`py_compile`, catches
+  syntax/AST errors) then lints + checks formatting via `ruff` (run through
+  `uvx`, nothing to pre-install). All checks run even if one fails, so you see
+  everything in one pass. It never edits files.
+- **`autofix_lint_formatting.sh`** is the write counterpart: `eslint --fix`,
+  `ruff check --fix` (safe fixes only), and `ruff format`. Type errors and
+  unsafe lint hits still need a human; re-run `error_check.sh` to confirm.
+
+A **pre-push hook** (`.githooks/pre-push`) runs `error_check.sh` so a broken
+push never reaches the remote (or the CI it triggers). The hook is
+version-controlled rather than living in `.git/hooks/`; activate it once per
+clone with:
+
+```
+git config core.hooksPath .githooks
+```
+
+Bypass it for a work-in-progress branch with `git push --no-verify`.
+
 ## Present (and past) architecture
 
 Showing the evolution of the architecture in this repo.

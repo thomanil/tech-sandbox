@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Pre-push guardrail: run the repo's static checks before anything leaves your
+# machine, so a broken type-check, lint, or syntax error never reaches the
+# remote (and the CI it triggers).
+#
+# This hook is version-controlled under .githooks/ rather than living only in
+# .git/hooks/. It's active when this clone's core.hooksPath points here:
+#
+#     git config core.hooksPath .githooks
+#
+# (run once per clone; see README). To push despite a failure — e.g. a
+# work-in-progress branch — bypass it with `git push --no-verify`.
+set -uo pipefail
+
+# git runs hooks from the repo root, but resolve relative to this file anyway so
+# the hook works no matter how it's invoked.
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+
+if ! "$repo_root/scripts/error_check.sh"; then
+  printf '\n\033[31mpre-push: error_check.sh failed — push aborted.\033[0m\n'
+  printf 'Fix the issues above (try scripts/autofix_lint_formatting.sh), or push with --no-verify to bypass.\n'
+  exit 1
+fi
