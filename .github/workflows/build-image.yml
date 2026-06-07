@@ -42,7 +42,38 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/timeline-server
 
 jobs:
+  # Static guardrail: the CI counterpart to the local pre-push hook. Runs the
+  # same scripts/error_check.sh (tsc + eslint for the web client; py_compile +
+  # ruff for Python) so broken code never gets built, pushed, or deployed. The
+  # script installs the web deps (npm ci) and fetches ruff (via uvx) itself, so
+  # this job just provides node + uv and runs it — one source of truth for
+  # "is the code sound?", local and in CI.
+  error-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Match the Dockerfile's web-build stage (node 22).
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/client-web/package-lock.json
+
+      # Provides uv/uvx so scripts/error_check.sh can run ruff. python3 is already
+      # on the ubuntu-latest runner, which covers the py_compile check.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Run static error checks
+        run: bash scripts/error_check.sh
+
   build-and-push:
+    needs: error-check # don't build/push an image that fails the static checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
