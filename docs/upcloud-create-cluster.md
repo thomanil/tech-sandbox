@@ -21,10 +21,18 @@ quickly. The steps, in order:
    its kubeconfig from (the workflow writes it to a temp file at deploy time):
    `gh secret set UPCLOUD_KUBECONFIG < ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml`
 6. **Provision managed Postgres + create the `timeline-db` Secret.** On a fresh
-   cluster/account, create (or confirm) the managed Postgres 18 service, allow the
-   cluster's access, then create the `timeline-db` Secret holding the `DATABASE_URL`
-   (with `sslmode=require`). The Deployment references it and **won't start without
-   it**, so do this before deploying. Full steps:
+   cluster/account, create (or confirm) the managed Postgres 18 service and allow the
+   cluster's access, then create the `timeline-db` Secret holding the `DATABASE_URL`.
+   The Deployment references it via `secretKeyRef` and **won't start without it**
+   (it'd sit in `CreateContainerConfigError`), so do this before deploying:
+   ```bash
+   kubectl --kubeconfig ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml \
+     create secret generic timeline-db \
+     --from-literal=DATABASE_URL='postgres://upadmin:<PASSWORD>@postgres-sydqtmadgayy.db.upclouddatabases.com:11569/defaultdb?sslmode=require'
+   ```
+   `sslmode=require` is mandatory (UpCloud enforces TLS); URL-encode the password if
+   it has special characters. Verify with `kubectl ... get secret timeline-db`.
+   Provisioning details, rotation, and connection specifics:
    [`upcloud-postgres.md`](upcloud-postgres.md).
 7. **Deploy once** to provision the app load balancer and learn its public hostname:
    `./scripts/deploy-upcloud.sh`. It applies `k8s/timeline-server-upcloud.yaml`,
