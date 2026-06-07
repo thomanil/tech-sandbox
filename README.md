@@ -22,11 +22,11 @@ playback controls (back / play / stop / forward). Play advances 5 ticks per
 second. A dropdown picks the sequence — `Linear`, `Primes`, or `Fibonacci` —
 and each sequence remembers your own position.
 
-_Started with local client only:_
+_Started with local client only, state and everything in single script:_
 
 https://github.com/user-attachments/assets/0f184a50-a0fc-493b-9262-9a21439d7575
 
-_After a few iterations we have a observerable server that can handle multiple client sessions:_
+_After a few iterations we had a separate observable server that handles state concurrent multiple client sessions:_
 
 https://github.com/user-attachments/assets/0e8a17b8-b236-47f1-a588-66745e5aa157
 
