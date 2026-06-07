@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A tech-learning sandbox built around one tiny app: a scrolling-number timeline
 with playback controls (back / play / stop / forward). The app is deliberately
 trivial — the point of the repo is the **deployment evolution** around it,
-documented as seven iterations in `README.md` (local Qt script → WebSocket state
-server → Docker → minikube → GHCR/CI → UpCloud managed k8s → web client). When
+documented as eight iterations in `README.md` (local Qt script → WebSocket state
+server → Docker → minikube → GHCR/CI → UpCloud managed k8s → web client → Postgres
+persistence base case). When
 making changes, read the relevant README iteration section first; it explains the
 *why* behind each manifest, script, and Dockerfile stage in far more depth than
 the code comments.
@@ -44,8 +45,18 @@ Key invariants to preserve:
   its own independent state. Horizontal scaling would require shared state first.
 - **One message shape.** The server pushes `state_message()` on connect and every
   change; both clients render it. Changing the protocol means touching all three.
-- **`GET /healthz`** is the liveness/readiness probe used by compose and every k8s
-  manifest — keep it cheap and side-effect-free.
+- **Probes are split.** `GET /healthz` is the **liveness** probe — keep it cheap and
+  side-effect-free (never touch the DB, or a DB blip restart-loops a healthy pod).
+  `GET /readyz` is the **readiness** probe (and the compose healthcheck): it pings
+  the DB and 503s when it's down, so an outage de-registers the pod without killing
+  it.
+- **DB access is transparent via one `DATABASE_URL`** (a libpq conninfo string),
+  read by the server with no env branching: local compose Postgres / minikube →
+  cleartext, `sslmode=disable`; UpCloud managed Postgres → a k8s Secret,
+  `sslmode=require`. Unset means "no DB" and the server still boots. On startup it
+  applies pending migrations (yoyo-migrations, psycopg 3) and that's fatal on
+  failure. Migrations live in `app/server-python/db/migrations/` (baked into the
+  image; see its README for the concurrency/locking story).
 
 The server's three new-backend addresses live in **two parallel lists** that must
 be kept in sync when an environment changes: `SERVERS` in

@@ -29,6 +29,9 @@ on:
     paths:
       - "app/server-python/timeline_server.py"
       - "app/server-python/timeline_model.py"
+      # DB migrations are baked into the image and applied on startup, so a
+      # migration change needs a rebuild.
+      - "app/server-python/db/**"
       - "Dockerfile"
       - ".dockerignore"
       - ".github/workflows/build-image.yml"

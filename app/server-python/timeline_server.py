@@ -3,6 +3,8 @@
 # dependencies = [
 #     "fastapi==0.115.6",
 #     "uvicorn[standard]==0.34.0",
+#     "psycopg[binary]==3.3.4",
+#     "yoyo-migrations==9.0.0",
 # ]
 # ///
 
@@ -11,10 +13,16 @@
 Single source of truth: this process owns the timeline state in memory
 (per-sequence indices, the active sequence, and the play/pause flag) and runs
 the playback ticker. The GUI client is a thin renderer that streams commands in
-and state out over one WebSocket. GET /healthz is a liveness/readiness probe for
-container orchestration (Docker/k8s), and (when present) the static/ dir — the
-Vite build of the web client (app/client-web) — is served at / as the web client,
-same app, port, and origin as /ws.
+and state out over one WebSocket. GET /healthz is the cheap liveness probe and
+GET /readyz the readiness probe (which also pings the DB) for container
+orchestration (Docker/k8s), and (when present) the static/ dir — the Vite build of
+the web client (app/client-web) — is served at / as the web client, same app,
+port, and origin as /ws.
+
+On startup the server applies any pending database migrations (yoyo-migrations)
+against DATABASE_URL; see run_migrations() below. DATABASE_URL is a single libpq
+conninfo string so the same code talks to the local compose Postgres and the
+remote managed one transparently (only its sslmode differs); unset means "no DB".
 
 Bind host/port come from the HOST/PORT env vars (default 127.0.0.1:8000) so the
 container can publish on 0.0.0.0 without code changes; see Dockerfile.
@@ -26,15 +34,19 @@ never truly parallel, so the shared `model`/`playing` state needs no locks.
 
 import asyncio
 import logging
+import os
+import re
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import psycopg
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
+from yoyo import get_backend, read_migrations
 
 from timeline_model import SEQUENCES, TICKS_PER_SECOND, TimelineModel
 
@@ -199,8 +211,93 @@ async def ticker() -> None:
                 await manager.send_to_client(client_id, state_message(state))
 
 
+# --- database: startup migrations + readiness ping --------------------------
+#
+# DB access is transparent: the server reads a single DATABASE_URL (a libpq
+# conninfo string) and behaves identically everywhere — the only per-environment
+# difference is the sslmode token inside that string (disable for the local
+# compose/minikube Postgres, require for UpCloud's managed, TLS-enforcing one).
+# Unset DATABASE_URL means "no DB" — the server still boots (quick `uv run` dev).
+
+MIGRATIONS_DIR = Path(__file__).parent / "db" / "migrations"
+
+
+def _yoyo_url(dsn: str) -> str:
+    """yoyo picks its driver by URL scheme; pin it to psycopg 3 (the same driver
+    the app uses for /readyz) via postgresql+psycopg:// so we never pull in
+    psycopg2. Handles both postgres:// (UpCloud) and postgresql:// (compose,
+    minikube); libpq query params like sslmode ride along to psycopg unchanged."""
+    return re.sub(r"^postgres(ql)?://", "postgresql+psycopg://", dsn, count=1)
+
+
+def run_migrations() -> None:
+    """Apply pending DB migrations at startup, logging loudly what it does.
+
+    Synchronous (yoyo is sync), but this runs ONCE during lifespan startup —
+    before the ticker starts and before we accept any connection — so it never
+    blocks live request handling and needs no thread (the single-event-loop /
+    no-locks model is preserved). Connecting to apply migrations doubles as the
+    "is the DB reachable?" check, so there's no separate startup ping.
+
+    Driven solely by DATABASE_URL: unset -> skip and boot. Set but unreachable or
+    a failing migration -> raise, aborting startup so the pod CrashLoops until
+    it's fixed, rather than serving on a missing/half-applied schema.
+
+    Concurrency: yoyo takes a lock (a single-row yoyo_lock table) before applying;
+    a concurrent starter retries ~0.5s for up to 10s, then raises LockTimeout. See
+    db/migrations/README.md for the full locking story (and `yoyo break-lock`).
+    """
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        logger.info("DATABASE_URL not set; skipping database migrations")
+        return
+    logger.info(
+        "MIGRATIONS: applying pending migrations from %s (yoyo)", MIGRATIONS_DIR
+    )
+    logger.info(
+        "MIGRATIONS: initializing yoyo bookkeeping — any 'already exists' / "
+        "'does not exist' ERROR lines logged by Postgres during this step are yoyo "
+        "probing its own tables (it doesn't use CREATE IF NOT EXISTS); they are "
+        "expected and harmless, not migration failures"
+    )
+    try:
+        backend = get_backend(_yoyo_url(dsn))
+        migrations = read_migrations(str(MIGRATIONS_DIR))
+        with backend.lock():  # default 10s lock timeout
+            pending = backend.to_apply(migrations)
+            logger.info(
+                "MIGRATIONS: %d known, %d pending", len(migrations), len(pending)
+            )
+            for migration in pending:
+                logger.info("MIGRATIONS: applying %s", migration.id)
+            backend.apply_migrations(pending)
+        if pending:
+            logger.info(
+                "MIGRATIONS: done — applied %d migration(s); schema up to date",
+                len(pending),
+            )
+        else:
+            logger.info("MIGRATIONS: done — nothing pending, schema already up to date")
+    except Exception:
+        logger.exception("MIGRATIONS: FAILED — aborting startup")
+        raise
+
+
+async def ping_database(dsn: str, *, timeout: float = 2) -> None:
+    """Open a connection and run SELECT 1; raise on failure. Async (psycopg's
+    AsyncConnection) so the /readyz probe never blocks the event loop — never the
+    sync psycopg.connect."""
+    async with await psycopg.AsyncConnection.connect(
+        dsn, connect_timeout=timeout
+    ) as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT 1")
+            await cur.fetchone()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    run_migrations()  # fatal if DATABASE_URL set & DB unreachable / migration fails
     task = asyncio.create_task(ticker())
     try:
         yield
@@ -242,8 +339,27 @@ async def handle_command(client_id: int, msg: dict) -> None:
 
 @app.get("/healthz")
 async def healthz() -> dict:
-    """Liveness/readiness probe for Docker/k8s. Cheap and side-effect-free."""
+    """Liveness probe for Docker/k8s. Cheap and side-effect-free — deliberately
+    does NOT touch the DB, so a DB outage never restart-loops a healthy process.
+    DB reachability is the readiness probe's job (/readyz below)."""
     return {"status": "ok"}
+
+
+@app.get("/readyz")
+async def readyz() -> dict:
+    """Readiness probe: the process is up AND (when DATABASE_URL is set) Postgres
+    is reachable. Returns 503 if the DB is down so k8s pulls the pod out of the
+    load balancer — without killing it (that's liveness/healthz's job). Logs
+    loudly on failure so the cause is obvious in `kubectl logs`."""
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        return {"status": "ready", "db": "not configured"}
+    try:
+        await ping_database(dsn, timeout=2)  # under the probe's timeoutSeconds
+    except Exception as exc:
+        logger.error("READINESS FAILED: database unreachable: %s", exc)
+        raise HTTPException(status_code=503, detail="database unreachable")
+    return {"status": "ready", "db": "ok"}
 
 
 @app.websocket("/ws")
@@ -312,8 +428,6 @@ if STATIC_DIR.is_dir():
 
 
 if __name__ == "__main__":
-    import os
-
     import uvicorn
 
     # Default to loopback for local dev; the container sets HOST=0.0.0.0.

@@ -512,10 +512,40 @@ The Qt client (`app/client-python-qt`) still works and targets the same backend;
 the web client is an additional front end, not yet a replacement.
 
 
+### (Eighth iteration) Database persistence base case
+
+The first step toward persistence: wire the server to Postgres **transparently**.
+Timeline state is still in memory (so the single-replica/`Recreate` rules are
+unchanged) — what's new is the deployment plumbing and a database the server talks to
+the same way everywhere. It reads a single `DATABASE_URL` and never branches on
+environment: a `postgres:18` container locally (cleartext creds), the **same**
+container reused from minikube via `host.minikube.internal`, and a **managed
+Postgres 18** on UpCloud whose password lives in a k8s Secret. On startup it applies
+any pending migrations ([yoyo-migrations](https://ollycope.com/software/yoyo/), plain
+SQL, no ORM) before serving.
+
+Run it locally — the dev server script now brings up Postgres too, and you'll see
+`MIGRATIONS: done …` in the logs:
+
+```
+./scripts/start-local-dev-server.sh   # now also starts a postgres:18 container
+```
+
+Full details — the transparent `DATABASE_URL` model across the three environments,
+the psycopg 3 driver choice, startup migrations, and the split `/healthz`
+(liveness) / `/readyz` (readiness, DB-aware) probes — are in
+[`docs/database.md`](docs/database.md) (with the managed-DB specifics in
+[`docs/upcloud-postgres.md`](docs/upcloud-postgres.md) and migration conventions +
+locking in [`app/server-python/db/migrations/README.md`](app/server-python/db/migrations/README.md)).
+
 ### Next steps
 
-Persistence: postgres as base case. Postgres container locally, managed postgres in upcloud deployment
-Super simple sql query/update example pattern/example from python server, no orm
+Persistence base case shipped in the eighth iteration: transparent `DATABASE_URL`
+(Postgres container locally, managed Postgres on UpCloud), psycopg 3, and
+yoyo-migrations applied on server startup. Next: the first real schema + a simple
+no-ORM query/update pattern that actually persists timeline state across restarts;
+and, if the app ever needs more than one node, move migrations to a one-shot
+Job/initContainer (which itself requires externalizing the in-memory state first).
 
 Serverside streaming: feed/consume kafka and/or time series db, make the serve as adapter/mediator between that and gui client
 

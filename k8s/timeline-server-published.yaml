@@ -47,13 +47,22 @@ spec:
             # the Dockerfile's ENV, so it's not repeated here.
             - name: HOST
               value: "0.0.0.0"
+            # Reach the SAME Postgres docker-compose stands up on the host
+            # (published on :5432) — minikube resolves host.minikube.internal to
+            # the host. Plain value, not a Secret: throwaway local dev creds.
+            # sslmode=disable — the local container doesn't do TLS. NOTE: the
+            # compose Postgres must be running, or this pod CrashLoops (startup
+            # migration run is fatal if the DB is unreachable).
+            - name: DATABASE_URL
+              value: "postgresql://timeline:timeline@host.minikube.internal:5432/timeline?sslmode=disable"
+          # Readiness pings the DB (/readyz); liveness stays cheap (/healthz).
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: 8000
             initialDelaySeconds: 2
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
             failureThreshold: 3
           livenessProbe:
             httpGet:

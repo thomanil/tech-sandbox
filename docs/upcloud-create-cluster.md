@@ -20,21 +20,27 @@ quickly. The steps, in order:
 5. **Point CI at the new cluster** by re-setting the GitHub Actions secret CI reads
    its kubeconfig from (the workflow writes it to a temp file at deploy time):
    `gh secret set UPCLOUD_KUBECONFIG < ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml`
-6. **Deploy once** to provision the app load balancer and learn its public hostname:
+6. **Provision managed Postgres + create the `timeline-db` Secret.** On a fresh
+   cluster/account, create (or confirm) the managed Postgres 18 service, allow the
+   cluster's access, then create the `timeline-db` Secret holding the `DATABASE_URL`
+   (with `sslmode=require`). The Deployment references it and **won't start without
+   it**, so do this before deploying. Full steps:
+   [`upcloud-postgres.md`](upcloud-postgres.md).
+7. **Deploy once** to provision the app load balancer and learn its public hostname:
    `./scripts/deploy-upcloud.sh`. It applies `k8s/timeline-server-upcloud.yaml`,
    waits for the LB, and prints the client URL `wss://<lb-host>/ws`. (The LB
    hostname is brand-new on a recreated cluster, and the API-server LB in the
    kubeconfig is a separate one — use the hostname the script prints, not the one
    in the kubeconfig.)
-7. **Re-point the custom domain + TLS** at the new LB: update the DNSimple ALIAS to
+8. **Re-point the custom domain + TLS** at the new LB: update the DNSimple ALIAS to
    the new hostname, recreate the dynamic cert bundle, and put its new UUID in
    `k8s/timeline-server-upcloud.yaml`. Full steps:
    [`upcloud-custom-domain-tls.md`](upcloud-custom-domain-tls.md). (Clients target
    the stable domain `wss://tknilsson-sandbox.com/ws`, so the `SERVERS` lists don't
    change on recreate.)
-8. **Run `./scripts/error_check.sh`**, then commit.
-9. **Smoke-test the pipeline:** push a trivial change to `main` and confirm it flows
-   through CI to the live deploy / web app.
+9. **Run `./scripts/error_check.sh`**, then commit.
+10. **Smoke-test the pipeline:** push a trivial change to `main` and confirm it flows
+    through CI to the live deploy / web app.
 
 > **Related:** deploy mechanics (script, kubeconfig, CI wiring) →
 > [`upcloud-deployment.md`](upcloud-deployment.md); custom domain + cert →

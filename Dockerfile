@@ -45,6 +45,11 @@ RUN apt-get update \
 # timeline_model as a sibling module, so they must stay side by side).
 COPY app/server-python/timeline_model.py app/server-python/timeline_server.py ./
 
+# DB migrations, applied on startup by timeline_server.run_migrations() (and
+# reusable by a future one-shot migration Job from this same image). Lands at
+# /app/db/migrations. See app/server-python/db/migrations/README.md.
+COPY app/server-python/db ./db
+
 # Web client assets: the Vite build output from the web-build stage above,
 # dropped where timeline_server.py mounts it (static/). Content-hashed filenames,
 # so it's safe to cache hard.

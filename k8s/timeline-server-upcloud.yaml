@@ -63,13 +63,30 @@ spec:
             # the Dockerfile's ENV, so it's not repeated here.
             - name: HOST
               value: "0.0.0.0"
+            # Connection string for the managed Postgres (libpq conninfo). It
+            # carries the DB password, so — unlike the cleartext local/minikube
+            # value — it lives in a k8s Secret created out of band (like the
+            # kubeconfig and the TLS cert bundle), never committed. It MUST use
+            # sslmode=require: UpCloud's managed Postgres enforces TLS. The Secret
+            # must exist before the first deploy or the pod won't start
+            # (CreateContainerConfigError). Create/rotate it per
+            # docs/upcloud-postgres.md.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: timeline-db
+                  key: DATABASE_URL
+          # Readiness pings the managed DB (/readyz): an outage pulls the pod from
+          # the LoadBalancer (clients rejected) but does NOT restart-loop it —
+          # liveness stays on the cheap /healthz. The cause shows in `kubectl logs`
+          # as a loud "READINESS FAILED: ..." line.
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: 8000
             initialDelaySeconds: 2
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
             failureThreshold: 3
           livenessProbe:
             httpGet:

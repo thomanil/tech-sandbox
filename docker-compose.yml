@@ -7,18 +7,33 @@ services:
     environment:
       HOST: "0.0.0.0"
       PORT: "8000"
+      # DB access is transparent via a single DATABASE_URL (a libpq conninfo
+      # string). Locally it points at the `postgres` service below on the compose
+      # network. Cleartext creds are fine here — this is local-only and never
+      # ships; the remote password is a k8s Secret instead. sslmode=disable
+      # because the local container doesn't do TLS (UpCloud uses sslmode=require).
+      DATABASE_URL: "postgresql://timeline:timeline@postgres:5432/timeline?sslmode=disable"
     # Dev-only override: run uvicorn with --reload so the files synced in by
     # `watch` (below) trigger an in-process hot reload. The Dockerfile's prod
     # CMD (plain `python timeline_server.py`) is left untouched — this reloader
     # never ships, since compose is only used locally during dev.
     command: ["uvicorn", "timeline_server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # /readyz (not /healthz) so the compose health status reflects DB reachability
+    # too — it mirrors the k8s readiness probe. /healthz stays the cheap liveness
+    # check. curl returns non-zero on the 503 /readyz gives when the DB is down.
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/readyz"]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 5s
     restart: unless-stopped
+    # Wait for Postgres to accept connections before the server starts, so its
+    # startup migration run finds the DB up rather than CrashLooping on a cold
+    # `docker compose up`.
+    depends_on:
+      postgres:
+        condition: service_healthy
     # Live reload for dev, the server-side analog of the client's `entr -r`:
     # run `docker compose watch`, and on a save Compose copies the file into the
     # running container. No rebuild and no container restart — uvicorn's own
@@ -33,3 +48,34 @@ services:
         - path: app/server-python/timeline_model.py
           action: sync
           target: /app/timeline_model.py
+
+  # Local Postgres, the dev-side base case for persistence. Pinned to 18 to match
+  # the managed Postgres 18 the UpCloud deployment uses, so local and remote
+  # behave the same. Cleartext creds are intentional (local-only, never shipped).
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: timeline
+      POSTGRES_PASSWORD: timeline
+      POSTGRES_DB: timeline
+    # Published on the host so the minikube deployment can reach this same DB via
+    # host.minikube.internal:5432 (the compose network name `postgres` only
+    # resolves inside compose). Also handy for `psql` from the host during dev.
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U timeline -d timeline"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    # Persist data across `compose down`/`up` (wiped only by `compose down -v`).
+    # Postgres 18's image stores data in a major-version subdir and wants the
+    # mount at /var/lib/postgresql (NOT /var/lib/postgresql/data, which 18 rejects
+    # as an "unused mount"). See docker-library/postgres#37.
+    volumes:
+      - timeline-pgdata:/var/lib/postgresql
+
+volumes:
+  timeline-pgdata:
