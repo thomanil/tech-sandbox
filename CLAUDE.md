@@ -58,9 +58,9 @@ Dev (each script is the stable interface and live-reloads; they hide the
 underlying tech). Start the server first, then one or more clients:
 
 ```
-./scripts/start-server.sh        # state server on 127.0.0.1:8000 (docker compose watch)
+./scripts/start-local-dev-server.sh        # state server on 127.0.0.1:8000 (docker compose watch)
 ./scripts/start-python-client.sh # Qt GUI client (run again for a second window)
-./scripts/start-web-client.sh    # Vite/React web client w/ HMR on http://localhost:5173
+./scripts/start-local-dev-web-client.sh    # Vite/React web client w/ HMR on http://localhost:5173
 ```
 
 `uv run app/server-python/timeline_server.py` also boots the backend directly

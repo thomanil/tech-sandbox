@@ -7,7 +7,7 @@
 # restart). Open the printed http://localhost:5173 URL in a browser.
 #
 # Vite proxies /ws to the backend on :8000 (see app/client-web/vite.config.ts),
-# so run start-server.sh in another terminal and the web client talks to it on
+# so run start-local-dev-server.sh in another terminal and the web client talks to it on
 # the same origin — exactly as it will in the baked image, where the server
 # serves the production `vite build` at / instead.
 #

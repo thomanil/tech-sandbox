@@ -40,7 +40,7 @@ section "Web client (app/client-web)"
 (
   cd app/client-web || exit 1
   # A fresh checkout has no node_modules — install from the lockfile so eslint
-  # doesn't fail on missing deps (mirrors start-web-client.sh).
+  # doesn't fail on missing deps (mirrors start-local-dev-web-client.sh).
   if [ ! -d node_modules ]; then
     echo "Installing web client dependencies (first run)…"
     npm ci

@@ -48,16 +48,16 @@ up for now; Staging/Production are stubbed in `SERVERS`).
 Launch — start the server first, then one or more clients (two terminals):
 
 ```
-./scripts/start-server.sh    # state server on 127.0.0.1:8000
+./scripts/start-local-dev-server.sh    # state server on 127.0.0.1:8000
 ./scripts/start-python-client.sh    # Qt GUI client (run again for a second window)
-./scripts/start-web-client.sh    # Vite/React web client w/ HMR on http://localhost:5173
+./scripts/start-local-dev-web-client.sh    # Vite/React web client w/ HMR on http://localhost:5173
 ```
 
 These scripts are the stable dev interface: they hide the underlying tech so the
 workflow stays the same as it evolves. They all live-reload on source edits.
 What they run today:
 
-- **`start-server.sh`** → `docker compose watch`. The server runs containerized
+- **`start-local-dev-server.sh`** → `docker compose watch`. The server runs containerized
   (FastAPI/uvicorn); on a save to `app/server-python/timeline_server.py` or
   `app/server-python/timeline_model.py`,
   Compose syncs the file into the running container and uvicorn's `--reload`
@@ -67,10 +67,10 @@ What they run today:
 - **`start-python-client.sh`** → `entr -r uv run app/client-python-qt/timeline_client.py`. The client is a
   self-contained renderer (it imports nothing from the model or server), so only
   its own file is watched — server/model edits don't relaunch the GUI.
-- **`start-web-client.sh`** → `npm run dev` (Vite) in `app/client-web`. Serves the
+- **`start-local-dev-web-client.sh`** → `npm run dev` (Vite) in `app/client-web`. Serves the
   React/TS web client on `http://localhost:5173` with hot-module reload, and
   proxies `/ws` to the backend on `:8000` (see `vite.config.ts`) so it talks to a
-  `start-server.sh` backend on the same origin. This dev server is local-only;
+  `start-local-dev-server.sh` backend on the same origin. This dev server is local-only;
   the shipped path is a production `vite build` baked into the server image and
   served by the server itself (see below).
 
@@ -483,7 +483,7 @@ origin, so the picker is hidden — gated on `import.meta.env.DEV` (see
 `servers.ts` / `TimelinePlayer.tsx`).
 
 - **Local dev** runs the two halves as separate hot-reloading processes:
-  `start-server.sh` (backend on `:8000`) and `start-web-client.sh` (Vite dev
+  `start-local-dev-server.sh` (backend on `:8000`) and `start-local-dev-web-client.sh` (Vite dev
   server on `:5173`, proxying `/ws` → `:8000`). Edit-and-see is instant on both.
 - **Shipped build** collapses them onto one origin. The Dockerfile's first stage
   (`web-build`) runs `npm ci && vite build`, then the server stage copies the
@@ -507,7 +507,7 @@ flowchart TB
     subgraph uvclient["uv ephemeral venv"]
       qt["app/client-python-qt (PySide6 + QWebSocket)<br/>thin renderer + Server dropdown"]
     end
-    subgraph srv["start-server.sh backend (docker compose) :8000"]
+    subgraph srv["start-local-dev-server.sh backend (docker compose) :8000"]
       server["timeline_server.py<br/>(FastAPI + uvicorn: state + asyncio ticker)"]
       model["timeline_model.py<br/>(domain model)"]
     end

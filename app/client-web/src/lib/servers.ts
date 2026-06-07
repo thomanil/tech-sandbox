@@ -17,7 +17,7 @@ export const SAME_ORIGIN_LABEL = 'Same origin (served)'
 // `null` means "derive from window.location" (see resolveServerUrl).
 export const SERVERS: Record<string, string | null> = {
   [SAME_ORIGIN_LABEL]: null,
-  'Local docker (start-server.sh)': 'ws://127.0.0.1:8000/ws',
+  'Local docker (start-local-dev-server.sh)': 'ws://127.0.0.1:8000/ws',
   // NodePort on the minikube cluster; the IP is minikube's own (stable on the
   // docker driver). Update it if you recreate the cluster.
   'Local minikube (deploy-minikube.sh)': 'ws://192.168.49.2:30080/ws',

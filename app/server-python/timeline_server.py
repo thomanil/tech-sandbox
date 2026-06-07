@@ -285,7 +285,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
 # under assets/), baked into the image by the Dockerfile's web-build stage. The
 # mount is guarded on the dir existing so the WS-only paths still boot without it
 # — i.e. `uv run timeline_server.py` for quick backend dev (the web client is run
-# separately with hot reload via scripts/start-web-client.sh). It's registered
+# separately with hot reload via scripts/start-local-dev-web-client.sh). It's registered
 # AFTER /ws and /healthz because a mount at "/" is greedy and would shadow them.
 
 

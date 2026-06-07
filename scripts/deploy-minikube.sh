@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy the timeline state server to a local minikube cluster.
 # Use for local testing of k8s configs.
-# For more rapid local dev with live reloads etc, use start-server.sh instead (docker compose)
+# For more rapid local dev with live reloads etc, use start-local-dev-server.sh instead (docker compose)
 #
 # This is the stable entrypoint for "run the server in kubernetes locally". It
 # builds the image straight into minikube (no registry/push), applies the
