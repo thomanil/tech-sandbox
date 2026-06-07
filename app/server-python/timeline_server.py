@@ -213,7 +213,7 @@ async def ticker() -> None:
             if state.playing:
                 state.model.step_forward()
                 await manager.send_to_client(client_id, state_message(state))
-                mark_dirty(client_id)  # coalesced: flushed by persist_flusher()
+                persist_state_bg(client_id, state)  # fire-and-forget, per design
 
 
 # --- database: startup migrations + state persistence -----------------------
@@ -384,36 +384,13 @@ async def persist_state(client_id: int, state: ClientState) -> None:
         logger.exception("STATE: failed to persist client %s", client_id)
 
 
-# Two persistence paths, both kept off the hot tick path:
-#
-#   * persist_now()  — fire-and-forget single upsert for INFREQUENT explicit
-#     changes (connect, playback commands). These are user-paced (a click), not
-#     5/s, so a per-event DB round-trip is cheap and gives those actions prompt
-#     durability.
-#   * mark_dirty() + persist_flusher() — COALESCED path for the high-frequency
-#     ticker. Each playing client advances TICKS_PER_SECOND times a second; doing
-#     a DB round-trip per tick let a slow link (measured: minikube's host-hop
-#     Postgres) pace — and visibly drag — the ticker itself. Instead the tick just
-#     flags the client dirty (O(1), no I/O) and one background task writes each
-#     dirty client's LATEST state at most once per PERSIST_FLUSH_INTERVAL.
-#     Latest-wins coalescing collapses a burst of ticks into a single write.
-#
-# The table stays a faithful restart-resume mirror — worst case, a hard crash
-# loses under one flush interval of playback position — without the DB ever
-# pacing the ticker.
-
-PERSIST_FLUSH_INTERVAL = 1.0  # seconds; max staleness of the persisted mirror
-
 # Hold strong refs to in-flight fire-and-forget tasks so they aren't GC'd mid-write.
 _persist_tasks: set[asyncio.Task] = set()
 
-# Client ids whose in-memory state changed since the last flush (the tick path).
-_dirty_clients: set[int] = set()
 
-
-def persist_now(client_id: int, state: ClientState) -> None:
-    """Fire-and-forget single upsert for infrequent explicit changes. Returns
-    immediately so the caller never waits on the DB. No-op without a DB."""
+def persist_state_bg(client_id: int, state: ClientState) -> None:
+    """Fire-and-forget persist: schedule the upsert and return immediately so a
+    tick or command never waits on the DB (per design). No-op without a DB."""
     if pool is None:
         return
     task = asyncio.create_task(persist_state(client_id, state))
@@ -421,58 +398,15 @@ def persist_now(client_id: int, state: ClientState) -> None:
     task.add_done_callback(_persist_tasks.discard)
 
 
-def mark_dirty(client_id: int) -> None:
-    """Flag a client's state for the next coalesced flush. O(1), no I/O — safe to
-    call on every tick. No-op without a DB (nothing to mirror)."""
-    if pool is None:
-        return
-    _dirty_clients.add(client_id)
-
-
-async def flush_dirty() -> None:
-    """Persist the LATEST state of every client flagged dirty since the last call,
-    one upsert each. Reads current state from `states`, so coalesced ticks write
-    once with the freshest position. Clears the set up front so ticks arriving
-    mid-flush are caught by the next round, not dropped."""
-    if pool is None or not _dirty_clients:
-        return
-    batch = list(_dirty_clients)
-    _dirty_clients.clear()
-    for client_id in batch:
-        state = states.get(client_id)
-        if state is not None:
-            await persist_state(client_id, state)
-
-
-async def persist_flusher() -> None:
-    """Background writer for the coalesced tick path: every PERSIST_FLUSH_INTERVAL,
-    flush all dirty clients. One batch at a time, so DB writes never fan out per
-    tick nor pile into an overlapping backlog."""
-    while True:
-        await asyncio.sleep(PERSIST_FLUSH_INTERVAL)
-        try:
-            await flush_dirty()
-        except Exception:
-            logger.exception("STATE: periodic flush failed")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_migrations()  # fatal if DATABASE_URL set & DB unreachable / migration fails
     await open_state_pool()  # open pool + load persisted client state
-    tick_task = asyncio.create_task(ticker())
-    flush_task = asyncio.create_task(persist_flusher())  # coalesced tick persistence
+    task = asyncio.create_task(ticker())
     try:
         yield
     finally:
-        tick_task.cancel()
-        flush_task.cancel()
-        # Final flush so a graceful shutdown doesn't drop the last interval of
-        # dirty tick state — the pool is still open at this point.
-        try:
-            await flush_dirty()
-        except Exception:
-            logger.exception("STATE: final flush on shutdown failed")
+        task.cancel()
         await close_state_pool()
 
 
@@ -506,7 +440,7 @@ async def handle_command(client_id: int, msg: dict) -> None:
         return  # unknown action -> no state change, no send
     log_event(action, client_id)
     await manager.send_to_client(client_id, state_message(state))
-    persist_now(client_id, state)  # explicit command: persist immediately
+    persist_state_bg(client_id, state)  # write the change through (fire-and-forget)
 
 
 @app.get("/healthz")
@@ -554,7 +488,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
     if not known:
         # Record a brand-new client so it's recognized as "reconnected" (and
         # resumes its default-but-present state) after a pod restart.
-        persist_now(client_id, state)
+        persist_state_bg(client_id, state)
     try:
         # Initial full state for this client (resumes prior state if seed is known).
         await ws.send_json(state_message(state))

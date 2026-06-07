@@ -32,6 +32,21 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
+      # Block startup until the in-cluster Postgres accepts connections. The server
+      # runs migrations on boot and dies if the DB is unreachable, so without this
+      # a cold `deploy-minikube.sh` (DB + server applied together) would CrashLoop
+      # the server until Postgres won the race. pg_isready ships in the postgres
+      # image we already pull.
+      initContainers:
+        - name: wait-for-db
+          image: postgres:18
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h timeline-postgres -U timeline -d timeline; do
+                echo "waiting for timeline-postgres..."; sleep 2
+              done
       containers:
         - name: timeline-server
           image: timeline-server:latest
@@ -47,21 +62,24 @@ spec:
             # the Dockerfile's ENV, so it's not repeated here.
             - name: HOST
               value: "0.0.0.0"
-            # Reach the SAME Postgres docker-compose stands up on the host
-            # (published on :5432) — minikube resolves host.minikube.internal to
-            # the host. Plain value, not a Secret: these are throwaway local dev
-            # creds. sslmode=disable — the local container doesn't do TLS. NOTE:
-            # the compose Postgres must be running, or this pod CrashLoops (the
-            # server applies migrations on startup and that's fatal if the DB is
-            # unreachable).
+            # Reach the IN-CLUSTER Postgres defined at the bottom of this manifest
+            # (the timeline-postgres Service), NOT the host's docker-compose DB.
+            # Plain value, not a Secret: these are throwaway local dev creds.
+            # sslmode=disable — the local container doesn't do TLS.
             #
-            # The TRAILING DOT on the host (...internal.) is required, not a typo:
-            # it makes the name a FQDN so the resolver skips the search domains in
-            # the pod's resolv.conf (ndots:5). Without it, a slow search domain
-            # (e.g. a Tailscale one) adds ~6s to every lookup, which blows past the
-            # /readyz probe timeout and leaves the pod never-Ready.
+            # WHY in-cluster and not host.minikube.internal (which this used to be):
+            # the server holds a psycopg pool open against the DB, and over the host
+            # hop (pod → minikube docker bridge → host gateway → host :5432) those
+            # async DB sockets stalled the single event loop ~190ms on EVERY
+            # WebSocket send — even though a raw SELECT measured 0.1ms — dragging
+            # playback from 5 to ~3 ticks/s. Keeping the DB on the cluster's own pod
+            # network (like compose's same-network Postgres and UpCloud's managed
+            # one) removes that hop and restores full-rate ticks. The server still
+            # applies migrations on startup (fatal if the DB is down), so an
+            # initContainer below blocks until Postgres is reachable to avoid a
+            # CrashLoop on a cold cluster.
             - name: DATABASE_URL
-              value: "postgresql://timeline:timeline@host.minikube.internal.:5432/timeline?sslmode=disable"
+              value: "postgresql://timeline:timeline@timeline-postgres:5432/timeline?sslmode=disable"
           # Readiness pings the DB (/readyz) so a DB outage pulls the pod from the
           # Service; liveness stays on the cheap /healthz so a DB blip never
           # restart-loops a healthy process.
@@ -116,3 +134,87 @@ spec:
       port: 8000        # cluster-internal Service port
       targetPort: 8000  # container port
       nodePort: 30080   # fixed external port (valid range 30000-32767)
+---
+# In-cluster Postgres for local minikube testing.
+#
+# This deliberately does NOT reuse the host's docker-compose Postgres over
+# host.minikube.internal (which an earlier version of this manifest did). Holding
+# the server's psycopg pool open across that host hop stalled the single event
+# loop ~190ms on every WebSocket send and dragged playback to ~3 ticks/s; an
+# in-cluster DB keeps DB traffic on the fast pod network and restores 5/s. This is
+# the same "DB local to the runtime" topology compose and UpCloud already have.
+#
+# Pinned to postgres:18 to match compose and UpCloud's managed 18. Single replica
+# + Recreate because it owns one ReadWriteOnce PVC (two pods can't attach it at
+# once). Throwaway local dev creds, cleartext (no TLS), same as the server's
+# DATABASE_URL above. Inspect its data with:
+#   kubectl exec deploy/timeline-postgres -- psql -U timeline -d timeline -c '...'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: timeline-postgres-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: timeline-postgres
+  labels:
+    app: timeline-postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: timeline-postgres
+  template:
+    metadata:
+      labels:
+        app: timeline-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18
+          env:
+            - name: POSTGRES_USER
+              value: "timeline"
+            - name: POSTGRES_PASSWORD
+              value: "timeline"
+            - name: POSTGRES_DB
+              value: "timeline"
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "timeline", "-d", "timeline"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          volumeMounts:
+            # Postgres 18 stores data in a major-version subdir and wants the mount
+            # at /var/lib/postgresql (NOT .../data, which 18 rejects). Mirrors the
+            # compose volume note. See docker-library/postgres#37.
+            - name: data
+              mountPath: /var/lib/postgresql
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: timeline-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: timeline-postgres
+  labels:
+    app: timeline-postgres
+spec:
+  selector:
+    app: timeline-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

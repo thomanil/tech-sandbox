@@ -38,15 +38,8 @@ Key invariants to preserve:
   URL; the server keeps one `TimelineModel` + play flag per seed in
   `states: dict[int, ClientState]` (never evicted). When a DB is configured, that
   state is mirrored to `timeline.client_state` — loaded into `states` on startup and
-  written back so clients resume after a process/pod restart. Two write paths, both
-  off the hot tick path: infrequent explicit changes (new-connect/command) persist
-  immediately via a fire-and-forget upsert (`persist_now`); the high-frequency
-  ticker only flags the client dirty (`mark_dirty`), and a single background
-  `persist_flusher` writes each dirty client's latest state at most once per
-  `PERSIST_FLUSH_INTERVAL` (~1s, latest-wins coalescing). Per-tick DB round-trips
-  were dropped because a slow link (minikube's host-hop Postgres) let them pace and
-  visibly drag the ticker; a hard crash now loses under one flush interval of
-  position. Without a DB it still works, just
+  written through fire-and-forget on every change (tick/command/new-connect) — so
+  clients resume after a process/pod restart. Without a DB it still works, just
   resets on restart. `states` stays authoritative at runtime; the table is a
   restart-resume mirror, NOT a shared live store (see the single-replica rule).
 - **Single asyncio event loop, no locks.** The WS handlers, the `ticker()` task,
@@ -65,16 +58,20 @@ Key invariants to preserve:
   the DB and 503s when it's down, so an outage de-registers the pod without killing
   it.
 - **DB access is transparent via one `DATABASE_URL`** (a libpq conninfo string),
-  read by the server with no env branching: local compose Postgres / minikube →
-  cleartext, `sslmode=disable`; UpCloud managed Postgres → a k8s Secret,
-  `sslmode=require`. Unset means "no DB" and the server still boots. On startup it
+  read by the server with no env branching: compose's same-network Postgres and
+  minikube's own in-cluster Postgres (both defined in their manifests/compose
+  file) → cleartext, `sslmode=disable`; UpCloud managed Postgres → a k8s Secret,
+  `sslmode=require`. Every environment talks to a DB on its *own* internal network
+  — minikube deliberately does NOT reach the host's compose DB over
+  host.minikube.internal, because the server's open psycopg pool over that host
+  hop stalled the single event loop ~190ms per WebSocket send and dragged playback
+  to ~3 ticks/s (see `k8s/timeline-server-local.yaml`). Unset means "no DB" and the server still boots. On startup it
   applies pending migrations with **dbmate** (a single static Go binary baked into
   the image; `run_migrations()` shells out to `dbmate migrate`), fatal on failure.
   Migrations are plain SQL up/down files in `app/server-python/db/migrations/` (see
   its README for format + the advisory-lock concurrency story). Client state is then
-  loaded from / written to `timeline.client_state` via a `psycopg-pool`
-  pool (psycopg 3; writes never block a tick/command — see the two write paths
-  above: immediate fire-and-forget for commands, coalesced flush for ticks).
+  loaded from / written through to `timeline.client_state` via a `psycopg-pool`
+  pool (psycopg 3; writes are fire-and-forget, never block a tick/command).
 
 The server's three new-backend addresses live in **two parallel lists** that must
 be kept in sync when an environment changes: `SERVERS` in
