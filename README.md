@@ -111,6 +111,9 @@ git config core.hooksPath .githooks
 
 Bypass it for a work-in-progress branch with `git push --no-verify`.
 
+If a broken commit is pushed this way, however, it will not make its way to the public deployment
+since CI runs the same error check and will not continue rollout on error.
+
 ## Present (and past) architecture
 
 Showing the evolution of the architecture in this repo.
