@@ -23,7 +23,7 @@ playback controls (back / play / stop / forward). Play advances 5 ticks per
 second. A dropdown picks the sequence — `Linear`, `Primes`, or `Fibonacci` —
 and each sequence remembers your own position.
 
-_Started with local client only, state and everything in single script:_
+_Started with local python script – state and everything in single script:_
 
 https://github.com/user-attachments/assets/0f184a50-a0fc-493b-9262-9a21439d7575
 
