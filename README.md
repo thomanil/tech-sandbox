@@ -480,7 +480,7 @@ origin, so the picker is hidden — gated on `import.meta.env.DEV` (see
   `assets/` and the page load from the same host the WebSocket connects back to,
   so the one image works unchanged on localhost, the minikube NodePort, and the
   UpCloud load balancer.
-- 
+
 So there are now two architectural shapes depending on how it's run. **In local
 dev** the page and the backend are two origins, bridged by Vite's `/ws` proxy:
 
