@@ -548,3 +548,7 @@ the web client is an additional front end, not yet a replacement.
 Persistence: postgres as base case. Postgres container locally, managed postgres in upcloud deployment
 
 Serverside streaming: feed/consume kafka and/or time series db, make the serve as adapter/mediator between that and gui client
+
+More interesting/concrete domain: find something fun to visualize and stream. Weather data? Public energy sector data?
+
+Add unit test suites to QA guardrails. Unit+api integration serverside, e2e playwright clientside
