@@ -508,7 +508,7 @@ flowchart TB
 ```
 
 **In the shipped image** the two stages of the Dockerfile bake the web build into
-the server, which then serves the SPA and `/ws` from one origin — so the browser
+the server, which then serves the SPA and `/ws` from one origin (single url+port) — so the web client
 talks back to exactly the host it loaded from, on minikube or UpCloud alike:
 
 ```mermaid
