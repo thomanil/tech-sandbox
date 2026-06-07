@@ -30,7 +30,9 @@ export const SERVERS: Record<string, string | null> = {
 // Shipped build → the serving origin; local dev → the Local docker backend.
 // import.meta.env.DEV is statically true under the Vite dev server, false in
 // `vite build`, so this constant-folds per build.
-export const DEFAULT_SERVER = import.meta.env.DEV ? 'Local docker' : SAME_ORIGIN_LABEL
+export const DEFAULT_SERVER = import.meta.env.DEV
+  ? 'Local docker (start-local-dev-server.sh)'
+  : SAME_ORIGIN_LABEL
 
 /** The ws:// (or wss://) URL for a server label, deriving the same-origin one
  *  from the current page so it follows http→ws / https→wss automatically. */
