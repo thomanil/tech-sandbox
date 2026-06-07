@@ -51,7 +51,7 @@ resumes where it left off.
 Launch locally — start the server first, then a web or python client:
 
 ```
-./scripts/start-local-dev-server.sh        # state server on 127.0.0.1:8000
+./scripts/start-local-dev-server.sh        # python server on 127.0.0.1:8000
 ./scripts/start-python-client.sh           # Qt GUI client (run again for a second window)
 ./scripts/start-local-dev-web-client.sh    # Vite/React web client w/ HMR on http://localhost:5173
 ```
