@@ -461,22 +461,7 @@ flowchart TB
 
 A second client lives in `app/client-web` (Vite + React + TypeScript, UI built
 with [shadcn/ui](https://ui.shadcn.com) + Tailwind v4). It mirrors the Qt client
-feature-for-feature — the scrolling timeline window, the Sequence picker, and the
-⏮/▶/■/⏭ transport — as a thin renderer over one WebSocket (`useTimelineSocket`):
-it holds no state, draws whatever window the server pushes, auto-reconnects while
-the server is down, and disables the controls behind a status banner when
-offline.
-
-The timeline window (`TimelineWindow.tsx`) ports the Qt client's render: the
-centre value is large, bold, and accented, and it **auto-scales down to fit its
-cell** so a long (5+ digit) number shrinks instead of overflowing — the same idea
-as the Qt client's `_fitted_font`, done here by dividing a usable cell width by
-the monospace digit count. The neighbours fall away from the centre on three
-cues at once — a muted base colour, opacity dropping steeply with distance
-(~0.8 → ~0.15), and the font shrinking — so the row visibly trails off toward its
-edges while keeping a stable width. (Opacity-toward-background is used rather than
-the Qt client's literal grey ramp so the fade stays correct in dark mode, where a
-fixed grey would *brighten* instead of recede.)
+feature-for-feature.
 
 It is served by the **same** server process — and so the same minikube/UpCloud
 node and k8s Service — that owns `/ws`, with no second service and no CORS. The
@@ -491,12 +476,11 @@ origin, so the picker is hidden — gated on `import.meta.env.DEV` (see
 - **Shipped build** collapses them onto one origin. The Dockerfile's first stage
   (`web-build`) runs `npm ci && vite build`, then the server stage copies the
   resulting `dist/` to `app/server-python/static/`. `timeline_server.py` mounts
-  that dir at `/` (with an `index.html` SPA fallback for deep links), guarded on
-  the dir existing so a plain `uv run` backend still boots without it. The hashed
+  that dir at `/` (with an `index.html` SPA fallback for deep links). The hashed
   `assets/` and the page load from the same host the WebSocket connects back to,
   so the one image works unchanged on localhost, the minikube NodePort, and the
-  UpCloud load balancer. `static/` is generated, never committed (gitignored).
-
+  UpCloud load balancer.
+- 
 So there are now two architectural shapes depending on how it's run. **In local
 dev** the page and the backend are two origins, bridged by Vite's `/ws` proxy:
 
