@@ -16,6 +16,8 @@ set -uo pipefail
 # the hook works no matter how it's invoked.
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 
+echo "Running quality check before push, to head off any obvious issues from getting into main branch..."
+
 if ! "$repo_root/scripts/error_check.sh"; then
   printf '\n\033[31mpre-push: error_check.sh failed — push aborted.\033[0m\n'
   printf 'Fix the issues above (try scripts/autofix_lint_formatting.sh), or push with --no-verify to bypass.\n'
