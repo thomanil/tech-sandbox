@@ -53,6 +53,7 @@ export function TimelinePlayer() {
     <Card className="w-full max-w-xl gap-0">
       <CardHeader className="border-b">
         <CardTitle className="text-lg">Timeline</CardTitle>
+        <span className="text-gray-500">Streaming number sequence state from a python backend server</span>
         <CardAction className="self-center">
           {connected ? (
             <Badge variant={state?.playing ? 'default' : 'secondary'}>
