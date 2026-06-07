@@ -37,17 +37,17 @@ https://github.com/user-attachments/assets/cf995f77-71ce-4fcc-b31b-7cdfcdd83d69
 
 State lives in a separate **server** process: a FastAPI/uvicorn app
 (`timeline_server.py`) owns the timelines (per-sequence positions, the active
-sequence, and the play/pause flag) and runs the playback clock. 
+sequence, and the play/pause flag) and runs the playback clock.
 
 The GUI is a thin client that streams commands and state over one
 WebSocket. State is **per client**: each client process generates a random
 integer seed at startup, sends it as `?client_id=` on the WebSocket URL, and the
 server keeps an independent timeline per seed — so two windows can sit on
-different sequences, positions, and play/pause states at once. 
+different sequences, positions, and play/pause states at once.
 
 A single server-side ticker drives them all, advancing only the clients currently
 playing. State is keyed by seed and persists across reconnects, so a client
-resumes where it left off. 
+resumes where it left off.
 
 Launch locally — start the server first, then a web or python client:
 
@@ -541,3 +541,10 @@ flowchart TB
 
 The Qt client (`app/client-python-qt`) still works and targets the same backend;
 the web client is an additional front end, not yet a replacement.
+
+
+### Next steps
+
+Persistence: postgres as base case. Postgres container locally, managed postgres in upcloud deployment
+
+Serverside streaming: feed/consume kafka and/or time series db, make the serve as adapter/mediator between that and gui client
