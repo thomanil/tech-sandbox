@@ -38,8 +38,15 @@ Key invariants to preserve:
   URL; the server keeps one `TimelineModel` + play flag per seed in
   `states: dict[int, ClientState]` (never evicted). When a DB is configured, that
   state is mirrored to `timeline.client_state` — loaded into `states` on startup and
-  written through fire-and-forget on every change (tick/command/new-connect) — so
-  clients resume after a process/pod restart. Without a DB it still works, just
+  written back so clients resume after a process/pod restart. Two write paths, both
+  off the hot tick path: infrequent explicit changes (new-connect/command) persist
+  immediately via a fire-and-forget upsert (`persist_now`); the high-frequency
+  ticker only flags the client dirty (`mark_dirty`), and a single background
+  `persist_flusher` writes each dirty client's latest state at most once per
+  `PERSIST_FLUSH_INTERVAL` (~1s, latest-wins coalescing). Per-tick DB round-trips
+  were dropped because a slow link (minikube's host-hop Postgres) let them pace and
+  visibly drag the ticker; a hard crash now loses under one flush interval of
+  position. Without a DB it still works, just
   resets on restart. `states` stays authoritative at runtime; the table is a
   restart-resume mirror, NOT a shared live store (see the single-replica rule).
 - **Single asyncio event loop, no locks.** The WS handlers, the `ticker()` task,
@@ -65,8 +72,9 @@ Key invariants to preserve:
   the image; `run_migrations()` shells out to `dbmate migrate`), fatal on failure.
   Migrations are plain SQL up/down files in `app/server-python/db/migrations/` (see
   its README for format + the advisory-lock concurrency story). Client state is then
-  loaded from / written through to `timeline.client_state` via a `psycopg-pool`
-  pool (psycopg 3; writes are fire-and-forget, never block a tick/command).
+  loaded from / written to `timeline.client_state` via a `psycopg-pool`
+  pool (psycopg 3; writes never block a tick/command — see the two write paths
+  above: immediate fire-and-forget for commands, coalesced flush for ticks).
 
 The server's three new-backend addresses live in **two parallel lists** that must
 be kept in sync when an environment changes: `SERVERS` in

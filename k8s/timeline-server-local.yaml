@@ -86,7 +86,18 @@ spec:
               cpu: "50m"
               memory: "64Mi"
             limits:
-              cpu: "250m"
+              # NOTE: deliberately HIGHER than the upcloud manifest's "250m".
+              # 250m is plenty on UpCloud's real, un-nested hardware, but this
+              # minikube node runs as a Docker container inside an aarch64 Linux
+              # VM that is itself nested on a Mac. Under that double virtualization
+              # each instruction is slower, so the tiny per-tick work (5 ticks/s:
+              # step + serialize + WS send + fire-and-forget DB persist) overruns
+              # a 25ms/100ms CFS budget and the event loop gets throttled in ~2/3
+              # of periods — playback visibly crawls. Confirmed via the pod's
+              # cgroup cpu.stat (nr_throttled climbing). A roomier limit keeps the
+              # timer wakeups on time. This is a local-only test manifest, so the
+              # extra headroom costs nothing and never ships.
+              cpu: "2"
               memory: "128Mi"
 ---
 apiVersion: v1
