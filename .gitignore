@@ -5,3 +5,8 @@
 # `vite build` may emit it here for `uv run` to serve). Never committed.
 /app/server-python/static/
 /app/server-python/__pycache__/
+
+# UpCloud cluster kubeconfig — holds cluster-admin creds. Kept on disk for local
+# deploys (scripts/deploy-upcloud.sh, logs-upcloud.sh) but never committed; CI
+# reads it from the UPCLOUD_KUBECONFIG Actions secret instead.
+/k8s/upcloud_timeline-public_kubeconfig.yaml

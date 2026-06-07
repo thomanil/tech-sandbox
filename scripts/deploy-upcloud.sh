@@ -19,15 +19,20 @@
 # minikube). As a guard it also asserts the expected cluster context before
 # changing anything.
 #
-# Prerequisites: kubectl, and the UpCloud kubeconfig committed at
-# k8s/upcloud_timeline-public_kubeconfig.yaml. The GHCR package must be PUBLIC
-# (it is) so the kubelet can pull without credentials.
+# Where the kubeconfig comes from:
+#   - Locally, from a gitignored file at k8s/upcloud_timeline-public_kubeconfig.yaml
+#     that you keep on disk (it is no longer committed — it holds cluster-admin
+#     creds).
+#   - In CI, the workflow writes the UPCLOUD_KUBECONFIG secret to a temp file and
+#     exports KUBECONFIG before calling this script; we honor an already-set
+#     KUBECONFIG and skip the local-file fallback.
+# The GHCR package must be PUBLIC (it is) so the kubelet can pull without creds.
 set -euo pipefail
 
 # Run from the repo root regardless of where the script is invoked from.
 cd "$(dirname "$0")/.."
 
-KUBECONFIG_FILE="k8s/upcloud_timeline-public_kubeconfig.yaml"
+DEFAULT_KUBECONFIG_FILE="$PWD/k8s/upcloud_timeline-public_kubeconfig.yaml"
 MANIFEST="k8s/timeline-server-upcloud.yaml"
 EXPECTED_CONTEXT="kubernetes-admin@timeline-public"
 
@@ -36,13 +41,18 @@ if ! command -v kubectl >/dev/null 2>&1; then
   echo "kubectl not found. Install it: https://kubernetes.io/docs/tasks/tools/" >&2
   exit 1
 fi
-if [[ ! -f "$KUBECONFIG_FILE" ]]; then
-  echo "UpCloud kubeconfig not found at $KUBECONFIG_FILE" >&2
-  exit 1
-fi
 
-# Pin every kubectl call below to the UpCloud cluster — not the user's default.
-export KUBECONFIG="$PWD/$KUBECONFIG_FILE"
+# Honor a KUBECONFIG supplied by the environment (CI); otherwise fall back to the
+# local, gitignored copy. Either way every kubectl call below is pinned to the
+# UpCloud cluster, never the user's default context.
+if [[ -z "${KUBECONFIG:-}" ]]; then
+  if [[ ! -f "$DEFAULT_KUBECONFIG_FILE" ]]; then
+    echo "No KUBECONFIG set and $DEFAULT_KUBECONFIG_FILE not found." >&2
+    echo "Put your UpCloud kubeconfig there, or export KUBECONFIG to point at it." >&2
+    exit 1
+  fi
+  export KUBECONFIG="$DEFAULT_KUBECONFIG_FILE"
+fi
 
 # --- Safety guard: make sure we're aimed at the right cluster ---------------
 CURRENT_CONTEXT="$(kubectl config current-context)"
@@ -85,7 +95,7 @@ done
 echo
 if [[ -z "$LB_HOST" ]]; then
   echo "Deployment is up, but the load balancer has no external address yet." >&2
-  echo "Check again with:  kubectl --kubeconfig $KUBECONFIG_FILE get service timeline-server -w" >&2
+  echo "Check again with:  kubectl --kubeconfig $KUBECONFIG get service timeline-server -w" >&2
   exit 1
 fi
 
@@ -93,4 +103,4 @@ echo "timeline-server is live on UpCloud. Point the client at:"
 echo "    wss://${LB_HOST}/ws"
 echo
 echo "Health check:  curl -fsS http://${LB_HOST}/healthz"
-echo "Logs:          kubectl --kubeconfig $KUBECONFIG_FILE logs -f deployment/timeline-server --timestamps"
+echo "Logs:          kubectl --kubeconfig $KUBECONFIG logs -f deployment/timeline-server --timestamps"

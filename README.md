@@ -384,12 +384,21 @@ what runs remotely.
 ./scripts/deploy-upcloud.sh
 ```
 
-It pins every `kubectl` call to the committed UpCloud kubeconfig
-(`k8s/upcloud_timeline-public_kubeconfig.yaml`) so it can never touch a local
-context by accident, asserts it's aimed at the expected cluster, applies
+It pins every `kubectl` call to the UpCloud kubeconfig so it can never touch a
+local context by accident, asserts it's aimed at the expected cluster, applies
 `k8s/timeline-server-upcloud.yaml`, forces a rollout (so the freshest `:latest`
 is pulled), waits for readiness, then waits for the load balancer's public
 hostname and prints the client URL.
+
+**Kubeconfig (cluster-admin creds — kept out of the repo).** The script reads the
+UpCloud kubeconfig from `$KUBECONFIG` if set, otherwise from a local file at
+`k8s/upcloud_timeline-public_kubeconfig.yaml`. That file is **gitignored**: keep
+your copy on disk for local deploys, but it is never committed. CI gets the same
+kubeconfig from the **`UPCLOUD_KUBECONFIG`** Actions secret — the workflow writes
+it to a temp file and exports `KUBECONFIG` before calling the script. One-time
+setup: add the secret with the file's contents under *Settings → Secrets and
+variables → Actions → New repository secret* (or
+`gh secret set UPCLOUD_KUBECONFIG < k8s/upcloud_timeline-public_kubeconfig.yaml`).
 
 The UpCloud manifest is the public-remote sibling of the minikube ones — same
 single-replica/`Recreate` rules and the same GHCR image — with three deliberate
@@ -418,9 +427,8 @@ differences for a real cluster:
 
 This deploy is also wired into CI for true continuous deployment: after the
 build-and-push job publishes a new `:latest`, a `deploy-upcloud` job in the same
-workflow runs `scripts/deploy-upcloud.sh` against the cluster (using the
-committed kubeconfig, so no secret is needed), forcing the rollout that pulls the
-new image. Without that step nothing would update on its own — `imagePullPolicy:
+workflow runs `scripts/deploy-upcloud.sh` against the cluster, forcing the
+rollout that pulls the new image. Without that step nothing would update on its own — `imagePullPolicy:
 Always` only re-pulls when a pod is *created*; nothing polls GHCR. The job is
 gated to `main` and serialized so two quick pushes don't race rollouts. You can
 still run `deploy-upcloud.sh` by hand for an out-of-band deploy. Note the trade-

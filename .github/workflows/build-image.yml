@@ -12,10 +12,11 @@
 #
 # After the push, the deploy-upcloud job forces a rollout on UpCloud so the new
 # :latest is actually pulled (imagePullPolicy: Always only re-pulls when a pod is
-# created — nothing polls GHCR on its own). It authenticates with the kubeconfig
-# committed at k8s/upcloud_timeline-public_kubeconfig.yaml, so no secret is
-# needed. (That kubeconfig holds cluster-admin creds in the repo — convenient for
-# a sandbox, but it's why this repo should stay private/trusted.)
+# created — nothing polls GHCR on its own). It authenticates with the cluster
+# kubeconfig stored as the UPCLOUD_KUBECONFIG repository secret: the job writes it
+# to a temp file and exports KUBECONFIG before running scripts/deploy-upcloud.sh.
+# (The kubeconfig holds cluster-admin creds, so it lives in Actions secrets — not
+# the repo. Locally the script falls back to a gitignored copy on disk.)
 name: Build, push, and deploy server image
 
 on:
@@ -146,9 +147,21 @@ jobs:
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
 
-      # The script pins KUBECONFIG to the committed UpCloud kubeconfig, asserts
+      # Write the cluster kubeconfig (stored as a secret, not committed) to a temp
+      # file and point KUBECONFIG at it. The script honors that KUBECONFIG, asserts
       # the expected cluster context, applies the manifest, forces a rollout, and
       # waits for readiness. The load balancer already exists from the first
       # deploy, so its address resolves immediately here.
       - name: Roll out latest image to UpCloud
-        run: bash scripts/deploy-upcloud.sh
+        env:
+          UPCLOUD_KUBECONFIG: ${{ secrets.UPCLOUD_KUBECONFIG }}
+        run: |
+          if [[ -z "$UPCLOUD_KUBECONFIG" ]]; then
+            echo "UPCLOUD_KUBECONFIG secret is not set. Add it under" \
+                 "Settings → Secrets and variables → Actions." >&2
+            exit 1
+          fi
+          install -m 600 /dev/null "$RUNNER_TEMP/upcloud-kubeconfig.yaml"
+          printf '%s\n' "$UPCLOUD_KUBECONFIG" > "$RUNNER_TEMP/upcloud-kubeconfig.yaml"
+          export KUBECONFIG="$RUNNER_TEMP/upcloud-kubeconfig.yaml"
+          bash scripts/deploy-upcloud.sh

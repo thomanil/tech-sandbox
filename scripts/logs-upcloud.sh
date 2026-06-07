@@ -6,10 +6,11 @@
 # (connects, playback commands) to stdout, which the container captures, so this
 # streams the roster tables as they happen on the live public cluster.
 #
-# Like deploy-upcloud.sh, every kubectl call is pinned to the committed UpCloud
-# kubeconfig via KUBECONFIG, so this never tails whatever your default kubectl
-# context happens to be (e.g. a local minikube). It also asserts the expected
-# cluster context before streaming.
+# Like deploy-upcloud.sh, every kubectl call is pinned to the UpCloud kubeconfig
+# via KUBECONFIG, so this never tails whatever your default kubectl context
+# happens to be (e.g. a local minikube). It honors an already-set KUBECONFIG and
+# otherwise falls back to the local, gitignored copy. It also asserts the
+# expected cluster context before streaming.
 #
 # Caveat: a follow is bound to a single pod. A deploy (deploy-upcloud.sh, or the
 # CI auto-rollout on a push to main) does a rollout that replaces the pod
@@ -21,7 +22,7 @@ set -euo pipefail
 # Run from the repo root regardless of where the script is invoked from.
 cd "$(dirname "$0")/.."
 
-KUBECONFIG_FILE="k8s/upcloud_timeline-public_kubeconfig.yaml"
+DEFAULT_KUBECONFIG_FILE="$PWD/k8s/upcloud_timeline-public_kubeconfig.yaml"
 EXPECTED_CONTEXT="kubernetes-admin@timeline-public"
 
 # --- Preflight: required tooling and config --------------------------------
@@ -29,13 +30,17 @@ if ! command -v kubectl >/dev/null 2>&1; then
   echo "kubectl not found. Install it: https://kubernetes.io/docs/tasks/tools/" >&2
   exit 1
 fi
-if [[ ! -f "$KUBECONFIG_FILE" ]]; then
-  echo "UpCloud kubeconfig not found at $KUBECONFIG_FILE" >&2
-  exit 1
-fi
 
-# Pin every kubectl call below to the UpCloud cluster — not the user's default.
-export KUBECONFIG="$PWD/$KUBECONFIG_FILE"
+# Honor a KUBECONFIG supplied by the environment; otherwise fall back to the
+# local, gitignored copy. Either way pin kubectl to the UpCloud cluster.
+if [[ -z "${KUBECONFIG:-}" ]]; then
+  if [[ ! -f "$DEFAULT_KUBECONFIG_FILE" ]]; then
+    echo "No KUBECONFIG set and $DEFAULT_KUBECONFIG_FILE not found." >&2
+    echo "Put your UpCloud kubeconfig there, or export KUBECONFIG to point at it." >&2
+    exit 1
+  fi
+  export KUBECONFIG="$DEFAULT_KUBECONFIG_FILE"
+fi
 
 # --- Safety guard: make sure we're aimed at the right cluster ---------------
 CURRENT_CONTEXT="$(kubectl config current-context)"
