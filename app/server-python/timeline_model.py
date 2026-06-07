@@ -2,7 +2,7 @@ TICKS_PER_SECOND = 5
 WINDOW_RADIUS = 4  # numbers shown on each side of the current value
 
 
-def _linear(i: int) -> int:
+def _lin  ear(i: int) -> int:
     """0, 1, 2, 3, 4, ..."""
     return i
 
