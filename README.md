@@ -538,14 +538,29 @@ the psycopg 3 driver choice, startup migrations, and the split `/healthz`
 [`docs/upcloud-postgres.md`](docs/upcloud-postgres.md) and migration conventions +
 locking in [`app/server-python/db/migrations/README.md`](app/server-python/db/migrations/README.md)).
 
-### Next steps
+```mermaid
+flowchart TB
+  subgraph local["💻 Local docker-compose"]
+    lsrv["timeline_server.py<br/>run_migrations() on startup<br/>/healthz (cheap) · /readyz (DB ping)"]
+    lpg[("postgres:18 container")]
+    lsrv -->|"DATABASE_URL (env, cleartext)<br/>sslmode=disable"| lpg
+  end
 
-Persistence base case shipped in the eighth iteration: transparent `DATABASE_URL`
-(Postgres container locally, managed Postgres on UpCloud), psycopg 3, and
-yoyo-migrations applied on server startup. Next: the first real schema + a simple
-no-ORM query/update pattern that actually persists timeline state across restarts;
-and, if the app ever needs more than one node, move migrations to a one-shot
-Job/initContainer (which itself requires externalizing the in-memory state first).
+  subgraph mk["☸️ Local minikube"]
+    msrv["timeline-server pod"]
+    msrv -->|"DATABASE_URL (manifest, cleartext)<br/>host.minikube.internal:5432<br/>sslmode=disable"| lpg
+  end
+
+  subgraph up["☁️ UpCloud"]
+    usrv["timeline-server pod"]
+    secret["k8s Secret timeline-db<br/>(password, out of band)"]
+    upg[("Managed Postgres 18<br/>(TLS-enforcing)")]
+    secret -->|"valueFrom secretKeyRef"| usrv
+    usrv -->|"DATABASE_URL<br/>sslmode=require"| upg
+  end
+```
+
+### Next steps
 
 Serverside streaming: feed/consume kafka and/or time series db, make the serve as adapter/mediator between that and gui client
 
