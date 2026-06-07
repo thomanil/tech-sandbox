@@ -22,6 +22,17 @@ set -uo pipefail
 # Run from the repo root regardless of where the script is invoked from.
 cd "$(dirname "$0")/.." || exit 1
 
+# GUI git frontends / IDEs launch with a minimal PATH that omits user tool dirs —
+# ~/.local/bin (uv/uvx) and nvm's node dir. Re-add the usual spots so this script
+# works no matter who invokes it (mirrors error_check.sh).
+prepend_path() { case ":$PATH:" in *":$1:"*) ;; *) [ -d "$1" ] && PATH="$1:$PATH";; esac; }
+prepend_path "$HOME/.local/bin"                  # uv, uvx
+if ! command -v npx >/dev/null 2>&1; then         # node via nvm: newest installed
+  newest_node_bin="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1)"
+  [ -n "$newest_node_bin" ] && prepend_path "$newest_node_bin"
+fi
+export PATH
+
 section() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 # --- Web client: ESLint --fix -----------------------------------------------

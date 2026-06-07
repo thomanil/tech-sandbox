@@ -29,6 +29,30 @@ set -uo pipefail
 # Run from the repo root regardless of where the script is invoked from.
 cd "$(dirname "$0")/.." || exit 1
 
+# GUI git frontends (magit/Emacs, IDEs) launch hooks with a minimal PATH that
+# omits user tool dirs — ~/.local/bin (uv/uvx) and nvm's node dir — so a push
+# that's fine from a terminal fails here with "uvx/npx: not found". Re-add the
+# usual spots so this script works no matter who invokes it.
+prepend_path() { case ":$PATH:" in *":$1:"*) ;; *) [ -d "$1" ] && PATH="$1:$PATH";; esac; }
+prepend_path "$HOME/.local/bin"                  # uv, uvx
+if ! command -v npx >/dev/null 2>&1; then         # node via nvm: newest installed
+  newest_node_bin="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1)"
+  [ -n "$newest_node_bin" ] && prepend_path "$newest_node_bin"
+fi
+export PATH
+
+# Fail early with a clear message if a required tool still isn't reachable,
+# rather than deep inside a check with a cryptic "command not found".
+missing=()
+for tool in node npx uvx python3; do
+  command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+done
+if [ "${#missing[@]}" -ne 0 ]; then
+  printf '\033[31merror_check: required tool(s) not found on PATH: %s\033[0m\n' "${missing[*]}"
+  printf 'PATH=%s\n' "$PATH"
+  exit 1
+fi
+
 # Collect the names of failed checks so we can report them all at the end.
 FAILURES=()
 section() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
