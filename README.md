@@ -551,4 +551,4 @@ Serverside streaming: feed/consume kafka and/or time series db, make the serve a
 
 More interesting/concrete domain: find something fun to visualize and stream. Weather data? Public energy sector data?
 
-Add unit test suites to QA guardrails. Unit+api integration serverside, e2e playwright clientside
+Add unit test suites to QA guardrails. Unit+api integration serverside, e2e playwright clientside. CI should run test suites.
