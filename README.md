@@ -11,7 +11,7 @@ Not every tool is needed for every workflow — see the "needed for" column.
 | [Python](https://www.python.org/) 3.11+ | Runs the client and server                                                                                  | everything |
 | [uv](https://docs.astral.sh/uv/) | Resolves the PEP 723 inline deps and runs the scripts (no manual `pip install`)                             | running client/server locally |
 | [Node.js](https://nodejs.org/) 22 + npm (e.g. via [nvm](https://github.com/nvm-sh/nvm)) | The Vite web ui dev + build ops (`npm`/`tsc`/`eslint`); matches the `node:22` build stage in the Dockerfile | web client dev **and** `error_check.sh`/`autofix_lint_formatting.sh` |
-| [entr](https://eradman.com/entrproject/) | Restarts the GUI client on source edits (`start-python-client.sh`)                                          | the client live-reload script |
+| [entr](https://eradman.com/entrproject/) | Restarts the Python client on source edits (`start-python-client.sh`)                                       | the client live-reload script |
 | [Docker](https://docs.docker.com/get-docker/) | Builds/runs the server container; also minikube's default driver                                            | compose dev **and** minikube |
 | [minikube](https://minikube.sigs.k8s.io/docs/start/) | Local single-node Kubernetes cluster                                                                        | local k8s deploy |
 | [kubectl](https://kubernetes.io/docs/tasks/tools/) | Applies manifests and drives the cluster                                                                    | local k8s deploy |
