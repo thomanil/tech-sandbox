@@ -387,6 +387,12 @@ single-replica/`Recreate` like the minikube siblings. Each auto-rollout restarts
 the single in-memory-stateful pod, so clients drop and state resets on every
 deployed push.
 
+To bounce the running pod without pushing a new image — to clear in-memory state,
+pick up a Secret/ConfigMap change, or recover a wedged pod — use
+`./scripts/upcloud-restart-pods.sh` (a `kubectl rollout restart`, same brief
+state-resetting interruption as a deploy). Follow its logs with
+`./scripts/logs-upcloud.sh`.
+
 Detail lives in [`docs/`](docs/) ([map](docs/README.md)):
 
 - **[`upcloud-deployment.md`](docs/upcloud-deployment.md)** — the deploy script,
