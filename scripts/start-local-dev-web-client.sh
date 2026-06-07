@@ -25,4 +25,25 @@ if [ ! -d node_modules ]; then
   npm ci
 fi
 
+# Open the app in the default browser once Vite is actually listening. We can't
+# do this after `exec npm run dev` (exec replaces this process), so fork a waiter
+# that polls the port, then opens the URL with whatever the platform provides.
+URL="http://localhost:5173/"
+(
+  for _ in $(seq 1 60); do
+    if curl -sf -o /dev/null "$URL"; then
+      if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$URL" >/dev/null 2>&1
+      elif command -v open >/dev/null 2>&1; then
+        open "$URL" >/dev/null 2>&1
+      else
+        echo "Could not find a browser launcher (xdg-open/open); open $URL manually."
+      fi
+      exit 0
+    fi
+    sleep 0.5
+  done
+  echo "Vite did not come up within 30s; open $URL manually."
+) &
+
 exec npm run dev
