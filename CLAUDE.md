@@ -1,0 +1,110 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A tech-learning sandbox built around one tiny app: a scrolling-number timeline
+with playback controls (back / play / stop / forward). The app is deliberately
+trivial — the point of the repo is the **deployment evolution** around it,
+documented as seven iterations in `README.md` (local Qt script → WebSocket state
+server → Docker → minikube → GHCR/CI → UpCloud managed k8s → web client). When
+making changes, read the relevant README iteration section first; it explains the
+*why* behind each manifest, script, and Dockerfile stage in far more depth than
+the code comments.
+
+## Architecture
+
+Three deployables, one wire protocol:
+
+- **`app/server-python/`** — the authoritative state server. `timeline_server.py`
+  (FastAPI/uvicorn) owns all state and the playback ticker; `timeline_model.py`
+  is the pure domain model (sequences + position). The server imports the model
+  as a **sibling module** (`from timeline_model import ...`), so the two files
+  must stay side by side — the Dockerfile flattens both into `/app`.
+- **`app/client-python-qt/`** — `timeline_client.py`, a thin PySide6 GUI renderer.
+  Holds no state; sends commands, draws whatever window the server pushes. Not
+  containerized — runs on the desktop, connects to a published port.
+- **`app/client-web/`** — a thin React/TS/Vite renderer (shadcn/ui + Tailwind v4),
+  feature-equivalent to the Qt client. In the shipped image it is **baked into
+  the server image** and served from the same origin as `/ws` (no second service,
+  no CORS).
+
+Key invariants to preserve:
+
+- **State is per-client and in-memory.** Each client generates a random integer
+  seed sent as `?client_id=` on the WebSocket URL; the server keeps one
+  `TimelineModel` + play flag per seed in `states: dict[int, ClientState]`. State
+  persists across reconnects (never evicted) and resets when the process dies.
+- **Single asyncio event loop, no locks.** The WS handlers, the `ticker()` task,
+  and broadcasts are cooperatively scheduled — never truly parallel — so shared
+  state needs no locking. Don't introduce threads or blocking calls.
+- **Must never scale past one replica.** Because state is in-process, every k8s
+  manifest is `replicas: 1` with a `Recreate` strategy. A second pod would keep
+  its own independent state. Horizontal scaling would require shared state first.
+- **One message shape.** The server pushes `state_message()` on connect and every
+  change; both clients render it. Changing the protocol means touching all three.
+- **`GET /healthz`** is the liveness/readiness probe used by compose and every k8s
+  manifest — keep it cheap and side-effect-free.
+
+The server's three new-backend addresses live in **two parallel lists** that must
+be kept in sync when an environment changes: `SERVERS` in
+`app/client-python-qt/timeline_client.py` and `SERVERS` in
+`app/client-web/src/lib/servers.ts`.
+
+## Common commands
+
+Dev (each script is the stable interface and live-reloads; they hide the
+underlying tech). Start the server first, then one or more clients:
+
+```
+./scripts/start-server.sh        # state server on 127.0.0.1:8000 (docker compose watch)
+./scripts/start-python-client.sh # Qt GUI client (run again for a second window)
+./scripts/start-web-client.sh    # Vite/React web client w/ HMR on http://localhost:5173
+```
+
+`uv run app/server-python/timeline_server.py` also boots the backend directly
+(no web client served) for quick Python-only dev.
+
+Quality checks (cover both halves of the codebase):
+
+```
+./scripts/error_check.sh             # READ-ONLY: tsc -b + eslint (web), py_compile + ruff check/format (python). Runs all checks even if one fails, exits non-zero on any failure.
+./scripts/autofix_lint_formatting.sh # write counterpart: eslint --fix, ruff check --fix, ruff format
+```
+
+A **pre-push hook** (`.githooks/pre-push`) runs `error_check.sh`. Activate once
+per clone with `git config core.hooksPath .githooks`. Bypass with
+`git push --no-verify`. Run `error_check.sh` before finishing any change.
+
+Deploy / test the real artifact:
+
+```
+./scripts/deploy-minikube.sh                    # build into minikube + apply k8s/timeline-server-local.yaml
+./scripts/test-latest-main-image-on-minikube.sh # pull GHCR :latest, apply k8s/timeline-server-published.yaml
+./scripts/deploy-upcloud.sh                      # apply k8s/timeline-server-upcloud.yaml to UpCloud (pinned kubeconfig)
+./scripts/logs-minikube.sh                       # follow server logs (kubectl logs -f, bound to one pod)
+```
+
+## Conventions
+
+- **PEP 723 inline dependencies.** Both Python entrypoints declare their deps in a
+  `# /// script` header at the top of the file — this is the single source of
+  truth. `uv` resolves them into an ephemeral env at runtime; the Dockerfile runs
+  `uv export --script` to install them at build time. Add/change a dep by editing
+  that header, not a separate requirements file.
+- **`tsc -b` then `vite build`** is the web build (see `package.json` scripts);
+  the Dockerfile's `web-build` stage runs `npm ci && vite build` and copies
+  `dist/` to `app/server-python/static/`, which the server mounts at `/`.
+  `static/` is generated, never committed (gitignored).
+- **Dockerfile base images are digest-pinned**, with the readable tag kept as a
+  comment and refresh instructions inline. The image is multi-arch (amd64 + arm64).
+- **CI** (`.github/workflows/build-image.yml`) builds + pushes
+  `ghcr.io/thomanil/timeline-server:{latest,sha-…}` on pushes to `main` touching
+  the server/Dockerfile, then runs a `deploy-upcloud` job — so a merge to `main`
+  auto-deploys (and resets the single stateful pod). `main` is the source of truth
+  for what runs remotely.
+
+## Workflow rules
+
+- Never git commit or push anything, those are done by human so diff is always reviewed
