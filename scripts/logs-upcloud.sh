@@ -44,4 +44,8 @@ if [[ "$CURRENT_CONTEXT" != "$EXPECTED_CONTEXT" ]]; then
   exit 1
 fi
 
-exec kubectl logs -f deployment/timeline-server --timestamps
+# Stream the logs, dropping the noisy healthcheck request lines. --line-buffered
+# keeps output flowing line-by-line for the follow; grep -v's exit status is
+# masked so a (transient) all-filtered chunk can't trip pipefail and kill the tail.
+kubectl logs -f deployment/timeline-server --timestamps \
+  | { grep -v --line-buffered "GET /healthz HTTP/1.1" || true; }
