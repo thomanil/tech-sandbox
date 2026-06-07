@@ -53,7 +53,7 @@ export function TimelinePlayer() {
     <Card className="w-full max-w-xl gap-0">
       <CardHeader className="border-b">
         <CardTitle className="text-lg">Timeline</CardTitle>
-        <span className="text-gray-500">Streaming number sequence state, state driven over websocket from a python api server</span>
+        <span className="text-gray-500">Streaming number sequence state, command and state streamed over websocket from a python api server</span>
         <CardAction className="self-center">
           {connected ? (
             <Badge variant={state?.playing ? 'default' : 'secondary'}>
