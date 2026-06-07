@@ -43,10 +43,11 @@ SERVERS = {
     # minikube's own; it's stable on the docker driver but if you recreate the
     # cluster, update this to whatever scripts/deploy-minikube.sh prints.
     "Local minikube": "ws://192.168.49.2:30080/ws",
-    # TLS-terminated at the UpCloud load balancer's 443 frontend (http mode,
-    # auto-provisioned cert), so this is wss:// on the default 443 port — no
-    # port in the URL. The plain-http :80 frontend still exists for healthz.
-    "Remote UpCloud": "wss://lb-0a473f0a3c4c4d3ba2adf3e8c27c2470-1.upcloudlb.com/ws",
+    # Custom domain (DNSimple ALIAS -> the LB hostname), TLS-terminated at the
+    # UpCloud LB's 443 frontend (http mode). The cert is a dynamic ZeroSSL bundle
+    # attached by UUID in the Service annotation so it survives CCM reconciles —
+    # see docs/upcloud-custom-domain-tls.md. wss:// on the default 443 port.
+    "Remote UpCloud": "wss://tknilsson-sandbox.com/ws",
 }
 DEFAULT_SERVER = "Local docker"
 

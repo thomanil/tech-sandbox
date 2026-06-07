@@ -21,8 +21,10 @@ export const SERVERS: Record<string, string | null> = {
   // NodePort on the minikube cluster; the IP is minikube's own (stable on the
   // docker driver). Update it if you recreate the cluster.
   'Local minikube (deploy-minikube.sh)': 'ws://192.168.49.2:30080/ws',
-  // TLS-terminated at the UpCloud LB's 443 frontend, so wss:// on the default port.
-  'Remote UpCloud': 'wss://lb-0a473f0a3c4c4d3ba2adf3e8c27c2470-1.upcloudlb.com/ws',
+  // Custom domain (DNSimple ALIAS -> the LB hostname), TLS-terminated at the UpCloud
+  // LB's 443 frontend. Dynamic ZeroSSL cert attached by UUID in the Service annotation
+  // so it survives CCM reconciles (see docs/upcloud-custom-domain-tls.md). wss:// on 443.
+  'Remote UpCloud': 'wss://tknilsson-sandbox.com/ws',
 }
 
 // Shipped build → the serving origin; local dev → the Local docker backend.
