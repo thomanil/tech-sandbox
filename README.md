@@ -1,4 +1,4 @@
-# tech-sandbox
+thuna# tech-sandbox
 
 Simple playground and example sandbox for some tech, tools and techniques.
 
@@ -28,8 +28,7 @@ https://github.com/user-attachments/assets/0f184a50-a0fc-493b-9262-9a21439d7575
 
 _After a few iterations we have a observerable server that can handle multiple client sessions:_
 
-https://github.com/user-attachments/assets/0e8a17b8-b236-47f1-a588-66745e5aa157
-
+https://github.com/user-attachments/assets/cf995f77-71ce-4fcc-b31b-7cdfcdd83d69
 
 State now lives in a separate **server** process: a FastAPI/uvicorn app
 (`timeline_server.py`) owns the timelines (per-sequence positions, the active
