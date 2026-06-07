@@ -91,6 +91,19 @@ flowchart TB
 
 ## Operational notes
 
+### minikube → host Postgres needs a trailing-dot FQDN
+
+The minikube manifests point `DATABASE_URL` at `host.minikube.internal.` — **with a
+trailing dot**. That's deliberate: the pod's `resolv.conf` uses `ndots:5` plus
+several search domains (including, on this dev box, a Tailscale one), so the short
+name `host.minikube.internal` gets tried against every search domain first, and a
+slow one adds ~6s to *every* lookup. That delay isn't bounded by `connect_timeout`
+(it's DNS, before the connect), so it blows past the `/readyz` 3s probe timeout and
+the pod never becomes `Ready` — the NodePort Service then has no endpoints and
+clients silently can't connect (even though startup migrations and `/healthz`
+succeed). The trailing dot makes the name a FQDN, so the resolver skips the search
+domains and resolves in ~0ms. Don't "tidy up" the dot.
+
 ### Expected Postgres log noise on startup
 
 The server logs a heads-up right before this happens ("MIGRATIONS: initializing yoyo
