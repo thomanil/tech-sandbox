@@ -97,7 +97,9 @@ class TimelineWidget(QWidget):
         font = QFont("Helvetica", base_pt)
         font.setBold(bold)
         pt = base_pt
-        while pt > self.MIN_FONT_PT and QFontMetrics(font).horizontalAdvance(text) > avail:
+        while (
+            pt > self.MIN_FONT_PT and QFontMetrics(font).horizontalAdvance(text) > avail
+        ):
             pt -= 1
             font.setPointSize(pt)
         return font
@@ -248,9 +250,7 @@ class MainWindow(QMainWindow):
 
     def _set_offline(self, message: str, is_error: bool) -> None:
         """Show the status banner, disable controls, and keep retrying."""
-        colors = (
-            ("#b91c1c", "#fee2e2") if is_error else ("#92400e", "#fef3c7")
-        )
+        colors = ("#b91c1c", "#fee2e2") if is_error else ("#92400e", "#fef3c7")
         fg, bg = colors
         prefix = "⚠ " if is_error else ""
         self.status_label.setText(prefix + message)

@@ -88,7 +88,5 @@ class TimelineModel:
         """
         return [
             self.value_at(i)
-            for i in range(
-                self.index - WINDOW_RADIUS, self.index + WINDOW_RADIUS + 1
-            )
+            for i in range(self.index - WINDOW_RADIUS, self.index + WINDOW_RADIUS + 1)
         ]

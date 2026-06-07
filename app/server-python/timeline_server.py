@@ -124,7 +124,9 @@ def roster_table(acting_id: int | None = None) -> str:
             )
         )
     widths = [max(len(row[i]) for row in rows) for i in range(len(headers))]
-    fmt = lambda row: "    " + "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row))
+    fmt = lambda row: (
+        "    " + "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row))
+    )
     rule = "    " + "-" * (sum(widths) + 2 * (len(widths) - 1))
     return "\n".join([fmt(headers), rule, *(fmt(row) for row in rows[1:])])
 
