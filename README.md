@@ -127,9 +127,7 @@ be quickly recreated, in that case these are the steps taken:
   the repo on purpose (cluster-admin creds — never in the working tree). This is
   the only local copy; `deploy-upcloud.sh` / `logs-upcloud.sh` fall back to it
   when `$KUBECONFIG` isn't already set.
-- A new cluster gets a new context name. Read it with
-  `KUBECONFIG=~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml kubectl config current-context`
-  and, if it changed, update `EXPECTED_CONTEXT` in **both** `scripts/deploy-upcloud.sh`
+- A new cluster may get a new context name. If it changed, update `EXPECTED_CONTEXT` in **both** `scripts/deploy-upcloud.sh`
   and `scripts/logs-upcloud.sh` to match (the scripts refuse to deploy unless the
   context matches, as a guard against hitting the wrong cluster).
 - Point CI at the new cluster by re-setting the GitHub Actions secret CI reads its
@@ -144,12 +142,9 @@ be quickly recreated, in that case these are the steps taken:
 - Update that new `wss://<lb-host>/ws` URL in the two parallel `SERVERS` lists
   (the "Remote UpCloud" entry in each):
   `app/client-python-qt/timeline_client.py` and `app/client-web/src/lib/servers.ts`.
+- Update any other references to the public https:// url with the updated domain
 - Run `./scripts/error_check.sh`, then commit.
-
-Note: deleting the old cluster is what actually invalidates its leaked kubeconfig
-— the old admin cert is signed by a CA that no longer exists and points at a
-torn-down API-server LB, so it's both untrusted and unreachable. No git-history
-scrub of the old cert is needed.
+- Do some minor change and verify that a push of that change shows up in the public deploy/webapp after
 
 
 ## Present (and past) architecture
