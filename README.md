@@ -30,26 +30,29 @@ _After a few iterations we have a observerable server that can handle multiple c
 
 https://github.com/user-attachments/assets/0e8a17b8-b236-47f1-a588-66745e5aa157
 
+_In the final iteration (for now) we have a public api + hosted webapp client both being hosted from a public web url_
 
-State now lives in a separate **server** process: a FastAPI/uvicorn app
+https://github.com/user-attachments/assets/cf995f77-71ce-4fcc-b31b-7cdfcdd83d69
+
+State lives in a separate **server** process: a FastAPI/uvicorn app
 (`timeline_server.py`) owns the timelines (per-sequence positions, the active
-sequence, and the play/pause flag) and runs the playback clock. The GUI
-(`timeline_client.py`) is a thin client that streams commands and state over one
+sequence, and the play/pause flag) and runs the playback clock. 
+
+The GUI is a thin client that streams commands and state over one
 WebSocket. State is **per client**: each client process generates a random
 integer seed at startup, sends it as `?client_id=` on the WebSocket URL, and the
 server keeps an independent timeline per seed — so two windows can sit on
-different sequences, positions, and play/pause states at once. A single
-server-side ticker drives them all, advancing only the clients currently
-playing. State is keyed by seed and persists across reconnects, so a client
-resumes where it left off. The client has a **Server** dropdown beside the
-sequence picker for choosing which backend to connect to (only `Local` is wired
-up for now; Staging/Production are stubbed in `SERVERS`).
+different sequences, positions, and play/pause states at once. 
 
-Launch — start the server first, then one or more clients (two terminals):
+A single server-side ticker drives them all, advancing only the clients currently
+playing. State is keyed by seed and persists across reconnects, so a client
+resumes where it left off. 
+
+Launch locally — start the server first, then a web or python client:
 
 ```
-./scripts/start-local-dev-server.sh    # state server on 127.0.0.1:8000
-./scripts/start-python-client.sh    # Qt GUI client (run again for a second window)
+./scripts/start-local-dev-server.sh        # state server on 127.0.0.1:8000
+./scripts/start-python-client.sh           # Qt GUI client (run again for a second window)
 ./scripts/start-local-dev-web-client.sh    # Vite/React web client w/ HMR on http://localhost:5173
 ```
 
@@ -75,12 +78,8 @@ What they run today:
   served by the server itself (see below).
 
 The bind address comes from the `HOST`/`PORT` env vars (default `127.0.0.1:8000`
-for local dev; the container sets `HOST=0.0.0.0`). `GET /healthz` is a liveness
+for local dev; the docker container sets `HOST=0.0.0.0`). `GET /healthz` is a liveness
 probe for the compose healthcheck and future k8s deployment.
-
-Dependencies are declared inline in each script (PEP 723), so `uv` installs
-them into an ephemeral env on first run — no separate `pip install` step
-needed.
 
 ## Quality checks
 
