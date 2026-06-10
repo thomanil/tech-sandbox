@@ -19,7 +19,8 @@ of that var and one token inside it differ:
 | Environment | Source of `DATABASE_URL` | TLS |
 | --- | --- | --- |
 | Local docker-compose | plain `environment:` value, cleartext, in version control | `sslmode=disable` |
-| Local minikube | plain `env.value` in the manifest (points at the compose Postgres via `host.minikube.internal:5432`) | `sslmode=disable` |
+| Local minikube (`overlays/local`) | plain `env.value` in the overlay, pointing at an **in-cluster** `timeline-postgres` the overlay bundles (PVC + Deployment + Service) | `sslmode=disable` |
+| Published-image minikube (`overlays/published`) | plain `env.value` pointing at the host's compose Postgres via `host.minikube.internal.:5432` | `sslmode=disable` |
 | **UpCloud** | **k8s Secret `timeline-db`** (carries the password, never committed) | **`sslmode=require`** |
 
 Unset `DATABASE_URL` means "no DB": the server still boots and skips migrations
@@ -100,6 +101,12 @@ DB logs `MIGRATIONS: FAILED — aborting startup` and CrashLoops.
 ## Local equivalent
 
 For dev, `docker-compose.yml` stands up a `postgres:18` container and points the
-server's `DATABASE_URL` at it (`sslmode=disable`, cleartext creds). The minikube
-manifests reuse that same container via `host.minikube.internal:5432`. So the only
+server's `DATABASE_URL` at it (`sslmode=disable`, cleartext creds). The two
+minikube overlays differ in where Postgres lives: `overlays/local` bundles its
+**own** in-cluster `postgres:18` (a PVC + Deployment + Service named
+`timeline-postgres`) and points at it on the pod network, while
+`overlays/published` reuses the host's compose container via
+`host.minikube.internal.:5432`. (`overlays/local` deliberately does NOT use the
+host hop — holding a psycopg pool open across it stalled the single event loop
+~190ms per WebSocket send; see the overlay's `postgres.yaml` comment.) So the only
 real difference remotely is the managed service + the Secret + `sslmode=require`.
