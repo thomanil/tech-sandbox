@@ -1,0 +1,22 @@
+# BASE Service: the parts common to every environment — the selector and the
+# `http` port named/targeting 8000. The TYPE and the published port list differ
+# per environment (NodePort 30080 on minikube; LoadBalancer 80+443 with the
+# UpCloud auto-TLS annotation on upcloud), so those are layered on by overlays.
+#
+# Default type is ClusterIP — the safe, purely-internal choice — so the base
+# alone never accidentally provisions a cloud LoadBalancer.
+apiVersion: v1
+kind: Service
+metadata:
+  name: timeline-server
+  labels:
+    app: timeline-server
+spec:
+  type: ClusterIP
+  selector:
+    app: timeline-server
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000        # cluster-internal Service port
+      targetPort: 8000  # container port

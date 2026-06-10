@@ -1,0 +1,97 @@
+# BASE Deployment for the timeline state server.
+#
+# Everything that is byte-for-byte identical across all three environments
+# (local minikube, published-on-minikube, upcloud) lives here exactly once.
+# Overlays patch only what genuinely differs: the image + pull policy, the
+# DATABASE_URL wiring, the local CPU-limit bump, the local wait-for-db init
+# container, and (via the Service) how the server is exposed.
+#
+# Invariants that belong in the BASE because they are true in EVERY environment:
+#
+#   * replicas: 1 + Recreate. The server holds per-client state in memory and
+#     runs one ticker for everyone (see timeline_server.py), so it must never
+#     scale past 1 — a second pod would keep its own independent state and the
+#     Service/LB would split clients across divergent states. Recreate (not the
+#     default RollingUpdate) keeps it to one pod at a time across a rollout.
+#
+#   * Split probes. /readyz is the readiness probe — it pings the DB, so a DB
+#     outage pulls the pod from the Service/LB (clients rejected) WITHOUT
+#     restarting it. /healthz is the cheap, side-effect-free liveness probe, so
+#     a DB blip never restart-loops an otherwise-healthy process. These timings
+#     are identical in all three legacy manifests, so they live here.
+#
+#   * Non-root securityContext matching the image's `useradd --uid 10001 app`.
+#
+# NOT in the base (set by overlays): imagePullPolicy, DATABASE_URL, the local
+# init container, and the local CPU-limit override.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: timeline-server
+  labels:
+    app: timeline-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: timeline-server
+  template:
+    metadata:
+      labels:
+        app: timeline-server
+    spec:
+      # Matches the non-root user baked into the image (useradd --uid 10001 app).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: timeline-server
+          # Logical image name. Overlays select the concrete image: local swaps
+          # this to the locally-built `timeline-server:latest` (via the images
+          # transformer); published/upcloud keep this GHCR reference. The upcloud
+          # overlay is also where image-automation will rewrite the tag to a SHA.
+          # imagePullPolicy is intentionally NOT set here — each overlay sets its
+          # own (Never / IfNotPresent / Always).
+          image: ghcr.io/thomanil/timeline-server:latest
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            # Bind on all interfaces inside the pod. PORT defaults to 8000 via
+            # the Dockerfile's ENV, so it's not repeated here. DATABASE_URL is
+            # added per-overlay because its shape differs (cleartext value for
+            # local/published, a Secret ref for upcloud).
+            - name: HOST
+              value: "0.0.0.0"
+          # Readiness pings the DB (/readyz) so a DB outage de-registers the pod;
+          # liveness stays on the cheap /healthz so a DB blip never restart-loops
+          # a healthy process. Same timings in every environment.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              # Base default matches published + upcloud. The local overlay bumps
+              # cpu to "2" because the minikube node runs under nested virtualization
+              # and the tiny per-tick work otherwise overruns the CFS budget and
+              # throttles playback — see overlays/local.
+              cpu: "250m"
+              memory: "128Mi"

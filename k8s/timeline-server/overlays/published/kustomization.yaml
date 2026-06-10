@@ -1,0 +1,64 @@
+# PUBLISHED overlay (minikube running the GHCR image, not a local build).
+# Reproduces the effective output of the legacy k8s/timeline-server-published.yaml.
+# This is the manual TEST path (scripts/test-latest-main-image-on-minikube.sh
+# pre-pulls :latest into minikube), NOT something Argo manages — so there is
+# deliberately no Argo Application for it. Differences from the base:
+#   - imagePullPolicy: IfNotPresent (the test script pre-pulls the tag into
+#     minikube; IfNotPresent reuses that copy without the kubelet needing its own
+#     registry access)
+#   - DATABASE_URL -> the host's docker-compose Postgres over host.minikube.internal
+#   - exposed via NodePort 30080 (same as local, so the client entry is unchanged)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+
+# Keep the published GHCR image; no rename. (No tag bump here — this path always
+# tests whatever :latest CI last pushed.)
+
+patches:
+  # Deployment: pull-from-registry test differences.
+  #   - imagePullPolicy: IfNotPresent
+  #   - DATABASE_URL -> host.minikube.internal. (the SAME Postgres compose stands
+  #     up on the host, published on :5432). The TRAILING DOT is required, not a
+  #     typo: it makes the name a FQDN so the resolver skips the pod's search
+  #     domains (ndots:5) — without it a slow search domain (e.g. Tailscale) adds
+  #     ~6s to every lookup and blows past the /readyz timeout. The compose
+  #     Postgres must be running or the pod CrashLoops (startup migration is fatal).
+  - target:
+      kind: Deployment
+      name: timeline-server
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: timeline-server
+      spec:
+        template:
+          spec:
+            containers:
+              - name: timeline-server
+                imagePullPolicy: IfNotPresent
+  # DATABASE_URL appended after HOST (matches legacy env order). host.minikube.internal.
+  # with the required trailing dot — see the note above.
+  - target:
+      kind: Deployment
+      name: timeline-server
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: DATABASE_URL
+          value: "postgresql://timeline:timeline@host.minikube.internal.:5432/timeline?sslmode=disable"
+
+  # Service: NodePort 30080, identical to local.
+  - target:
+      kind: Service
+      name: timeline-server
+    patch: |
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080
