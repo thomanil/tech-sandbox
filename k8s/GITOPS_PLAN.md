@@ -92,6 +92,43 @@ yourself; Argo just reconciles the Deployment/Service/Postgres.
 
 ---
 
+## Reverting to the push path
+
+The cutover is reversible — nothing here is a one-way door. The repo side is a
+single `git revert` of the cutover merge (it restores `deploy-upcloud.sh`, the
+three flat `k8s/timeline-server-*.yaml`, the CI `deploy-upcloud` job, and the
+`:latest` tag). But a `git revert` **alone is not enough**: the live-cluster and
+CI side effects aren't in Git, so you must also undo them by hand. To go fully
+back to push:
+
+1. **Do NOT delete the `UPCLOUD_KUBECONFIG` GitHub Actions secret until you are
+   fully done and certain you're staying on push.** The reverted CI deploy job
+   needs it — it is your cheap insurance for flipping back. Re-creating it means
+   re-extracting the cluster kubeconfig (annoying, not destructive). This is why
+   bootstrap step 7 above says "remove when convenient" — treat that as "only once
+   you will never revert."
+2. `git revert <cutover-merge>` on `main` (restores the push-based files).
+3. **Tear down Argo in the cluster, or it will fight the restored push flow**
+   (`selfHeal` reverts your `deploy-upcloud.sh` apply; Image Updater keeps
+   committing tag bumps to `main`):
+   - `kubectl -n argocd delete -f k8s/argocd/application-upcloud.yaml` — the
+     Application has **no** `resources-finalizer`, so this LEAVES the running
+     Deployment/Service in place (orphaned, not pruned); `deploy-upcloud.sh` then
+     re-adopts them with no outage.
+   - Stop/uninstall Argo CD Image Updater (and optionally Argo CD itself).
+   - Delete the `git-creds` secret (no longer needed).
+4. **Re-publish `:latest`:** the reverted workflow re-adds the `:latest` tag, so it
+   refreshes on the next push to `main`; until then `:latest` is frozen at the last
+   pre-cutover build (retag by hand if you need it sooner).
+5. Run the restored `scripts/deploy-upcloud.sh` once to confirm push deploys work.
+
+Because the overlays render identical to the old flat manifests and both modes
+deploy into the **same `default` namespace**, flipping push↔pull is a control-plane
+ownership change, not a workload change — the pod/Service spec doesn't churn, and
+the Postgres / `timeline-db` Secret / TLS bundle are untouched either way.
+
+---
+
 ## Operational notes / not-yet-done
 - [ ] Run the UpCloud bootstrap above (the cutover is inert until then).
 - [ ] After bootstrap, verify the loop end-to-end: push a trivial server change,

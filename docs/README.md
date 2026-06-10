@@ -9,6 +9,14 @@ narrative.
   transparent `DATABASE_URL` model across compose / minikube / UpCloud, the psycopg 3
   driver, startup migrations, and the split liveness/readiness probes.
 
+## Local Kubernetes (minikube)
+
+- **[minikube-local-k8s-canary.md](minikube-local-k8s-canary.md)** — using the
+  local minikube rig as a canary: the imperative working-tree loop
+  (`deploy-minikube.sh` → `apply -k overlays/local`), what it can and can't canary
+  vs the upcloud overlay, the canary→promote path, and why the local Argo
+  `Application` is *not* the working-tree canary.
+
 ## UpCloud deployment
 
 The public deployment runs on UpCloud Managed Kubernetes. For a newcomer, read in
