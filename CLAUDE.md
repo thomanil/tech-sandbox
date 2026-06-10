@@ -65,7 +65,7 @@ Key invariants to preserve:
   — minikube deliberately does NOT reach the host's compose DB over
   host.minikube.internal, because the server's open psycopg pool over that host
   hop stalled the single event loop ~190ms per WebSocket send and dragged playback
-  to ~3 ticks/s (see `k8s/timeline-server-local.yaml`). Unset means "no DB" and the server still boots. On startup it
+  to ~3 ticks/s (see `k8s/timeline-server/overlays/local/`). Unset means "no DB" and the server still boots. On startup it
   applies pending migrations with **dbmate** (a single static Go binary baked into
   the image; `run_migrations()` shells out to `dbmate migrate`), fatal on failure.
   Migrations are plain SQL up/down files in `app/server-python/db/migrations/` (see
@@ -106,11 +106,12 @@ per clone with `git config core.hooksPath .githooks`. Bypass with
 Deploy / test the real artifact:
 
 ```
-./scripts/deploy-minikube.sh                    # build into minikube + apply k8s/timeline-server-local.yaml
-./scripts/test-latest-main-image-on-minikube.sh # pull GHCR :latest, apply k8s/timeline-server-published.yaml
-./scripts/deploy-upcloud.sh                      # apply k8s/timeline-server-upcloud.yaml to UpCloud (pinned kubeconfig)
+./scripts/deploy-minikube.sh                    # build into minikube + apply -k k8s/timeline-server/overlays/local
+./scripts/test-latest-main-image-on-minikube.sh # pull GHCR sha-<commit> (default origin/main, or pass a ref), apply -k overlays/published
 ./scripts/logs-minikube.sh                       # follow server logs (kubectl logs -f, bound to one pod)
 ```
+
+UpCloud has **no deploy script** — it's GitOps/pull-based (see below). `./scripts/argo-web-console-{local,upcloud}.sh` open each cluster's Argo CD UI; `./scripts/{logs,upcloud-restart-pods}-upcloud.sh` tail/bounce the live pod.
 
 ## Conventions
 
@@ -126,10 +127,19 @@ Deploy / test the real artifact:
 - **Dockerfile base images are digest-pinned**, with the readable tag kept as a
   comment and refresh instructions inline. The image is multi-arch (amd64 + arm64).
 - **CI** (`.github/workflows/build-image.yml`) builds + pushes
-  `ghcr.io/thomanil/timeline-server:{latest,sha-…}` on pushes to `main` touching
-  the server/Dockerfile, then runs a `deploy-upcloud` job — so a merge to `main`
-  auto-deploys (and resets the single stateful pod). `main` is the source of truth
-  for what runs remotely.
+  `ghcr.io/thomanil/timeline-server:sha-<commit>` (immutable SHA tags only — **no
+  `:latest`**) on pushes to `main` touching the server/Dockerfile. CI does **not**
+  deploy: its job ends at "image in GHCR".
+- **Deployment is GitOps/pull, not push.** Production (UpCloud) runs **Argo CD**,
+  which syncs `k8s/timeline-server/overlays/upcloud` from `main`. **Argo CD Image
+  Updater** watches GHCR for the newest `sha-*` build and commits the tag bump into
+  `overlays/upcloud/kustomization.yaml` (`images[].newTag`), which Argo then rolls
+  out. So a merge to `main` auto-deploys via: CI pushes `sha-<commit>` → Image
+  Updater commits the bump → Argo syncs (and resets the single stateful pod). Git
+  is the source of truth for what runs remotely — the `newTag` in the upcloud
+  overlay names the live commit. Manifests live as a Kustomize **base + overlays**
+  (`base/`, `overlays/{local,published,upcloud}`); the Argo `Application`s are in
+  `k8s/argocd/`. See `k8s/GITOPS_PLAN.md` for the full flow + bootstrap runbook.
 
 ## Workflow rules
 

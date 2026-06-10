@@ -1,24 +1,21 @@
-# Build the timeline state server image, push it to GitHub Container Registry
-# (GHCR), and roll it out to the public UpCloud cluster — the full CD path for
-# every push to main. This is the CI counterpart to the local
+# Build the timeline state server image and push it to GitHub Container Registry
+# (GHCR) on every push to main. This is the CI counterpart to the local
 # `minikube image build` in scripts/deploy-minikube.sh: instead of baking the
 # image into one developer's minikube, it publishes a shareable artifact at
-#   ghcr.io/<owner>/timeline-server:latest
-# that scripts/test-latest-main-image-on-minikube.sh then pulls and runs.
+#   ghcr.io/<owner>/timeline-server:sha-<commit>
+# that scripts/test-latest-main-image-on-minikube.sh pulls and runs.
 #
-# The package must be PUBLIC for the unauthenticated minikube pull to work. GHCR
-# packages start private; flip it once under the package's settings (see README).
-# After that, this workflow's GITHUB_TOKEN keeps publishing new versions.
+# Deployment to UpCloud is NOT done here anymore — it is GitOps/pull-based. Argo
+# CD runs in the cluster and syncs k8s/timeline-server/overlays/upcloud from main;
+# Argo CD Image Updater watches GHCR for the newest sha-* tag and commits the bump
+# into overlays/upcloud/kustomization.yaml, which Argo then rolls out. So CI's job
+# ends at "image is in GHCR"; nothing in this workflow touches the cluster.
 #
-# After the push, the deploy-upcloud job forces a rollout on UpCloud so the new
-# :latest is actually pulled (imagePullPolicy: Always only re-pulls when a pod is
-# created — nothing polls GHCR on its own). It authenticates with the cluster
-# kubeconfig stored as the UPCLOUD_KUBECONFIG repository secret: the job writes it
-# to a temp file and exports KUBECONFIG before running scripts/deploy-upcloud.sh.
-# (The kubeconfig holds cluster-admin creds, so it lives in Actions secrets — not
-# the repo. Locally the script falls back to a copy kept outside the repo at
-# ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml.)
-name: Build, push, and deploy server image
+# The package must be PUBLIC for the unauthenticated minikube pull (and the
+# in-cluster Image Updater read) to work. GHCR packages start private; flip it
+# once under the package's settings (see README). After that, this workflow's
+# GITHUB_TOKEN keeps publishing new versions.
+name: Build and push server image
 
 on:
   push:
@@ -102,17 +99,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Derive tags/labels. :latest is what the minikube test script pulls;
-      # the immutable sha tag lets you pin/trace a specific build. The labels
-      # include org.opencontainers.image.source, which links the GHCR package
-      # back to this repo (so it inherits repo visibility and shows up there).
+      # Emit ONLY the immutable sha-<full-commit> tag. There is deliberately no
+      # mutable :latest anymore: under GitOps the running version is named in Git
+      # (overlays/upcloud/kustomization.yaml) and bumped to the newest sha-* build
+      # by Argo CD Image Updater. The labels include org.opencontainers.image.source,
+      # which links the GHCR package back to this repo (so it inherits repo
+      # visibility and shows up there).
       - name: Compute tags and labels
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
             type=sha,format=long
 
       - name: Build and push
@@ -127,45 +125,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Continuous deployment: once the new image is in GHCR, roll it out to UpCloud.
-  # Reuses scripts/deploy-upcloud.sh so CI does exactly what a local deploy does
-  # (same manifest, context guard, rollout, and LB-address wait) — one source of
-  # truth for "deploy to UpCloud".
-  deploy-upcloud:
-    needs: build-and-push # only deploy an image that actually built and pushed
-    # Guard to main, so a workflow_dispatch from a feature branch can rebuild the
-    # image without redeploying production.
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read # only needs the repo (kubeconfig + manifest); no packages
-    # Serialize deploys so two quick pushes don't race rollouts on the single
-    # replica; queue rather than cancel so an in-flight rollout finishes.
-    concurrency:
-      group: upcloud-deploy
-      cancel-in-progress: false
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      # Write the cluster kubeconfig (stored as a secret, not committed) to a temp
-      # file and point KUBECONFIG at it. The script honors that KUBECONFIG, asserts
-      # the expected cluster context, applies the manifest, forces a rollout, and
-      # waits for readiness. The load balancer already exists from the first
-      # deploy, so its address resolves immediately here.
-      - name: Roll out latest image to UpCloud
-        env:
-          UPCLOUD_KUBECONFIG: ${{ secrets.UPCLOUD_KUBECONFIG }}
-        run: |
-          if [[ -z "$UPCLOUD_KUBECONFIG" ]]; then
-            echo "UPCLOUD_KUBECONFIG secret is not set. Add it under" \
-                 "Settings → Secrets and variables → Actions." >&2
-            exit 1
-          fi
-          install -m 600 /dev/null "$RUNNER_TEMP/upcloud-kubeconfig.yaml"
-          printf '%s\n' "$UPCLOUD_KUBECONFIG" > "$RUNNER_TEMP/upcloud-kubeconfig.yaml"
-          export KUBECONFIG="$RUNNER_TEMP/upcloud-kubeconfig.yaml"
-          bash scripts/deploy-upcloud.sh
+  # NOTE: there is no deploy job. Deployment to UpCloud is GitOps/pull-based —
+  # Argo CD (in-cluster) syncs k8s/timeline-server/overlays/upcloud from main and
+  # Argo CD Image Updater bumps the image to the newest sha-* tag this workflow
+  # just pushed. CI's responsibility ends once the image is in GHCR.

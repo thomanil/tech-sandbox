@@ -1,0 +1,85 @@
+# In-cluster Postgres for local minikube testing. LOCAL-ONLY: this is the one
+# environment that ships its own DB inside the manifest. (published reaches the
+# host's docker-compose Postgres over host.minikube.internal; upcloud uses the
+# managed Postgres via a Secret.)
+#
+# This deliberately does NOT reuse the host's docker-compose Postgres over
+# host.minikube.internal. Holding the server's psycopg pool open across that host
+# hop stalled the single event loop ~190ms on every WebSocket send and dragged
+# playback to ~3 ticks/s; an in-cluster DB keeps DB traffic on the fast pod
+# network and restores 5/s. Same "DB local to the runtime" topology compose and
+# UpCloud already have.
+#
+# Pinned to postgres:18 to match compose and UpCloud's managed 18. Single replica
+# + Recreate because it owns one ReadWriteOnce PVC (two pods can't attach it at
+# once). Throwaway local dev creds, cleartext (no TLS), same as the server's
+# DATABASE_URL in the kustomization.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: timeline-postgres-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: timeline-postgres
+  labels:
+    app: timeline-postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: timeline-postgres
+  template:
+    metadata:
+      labels:
+        app: timeline-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18
+          env:
+            - name: POSTGRES_USER
+              value: "timeline"
+            - name: POSTGRES_PASSWORD
+              value: "timeline"
+            - name: POSTGRES_DB
+              value: "timeline"
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "timeline", "-d", "timeline"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          volumeMounts:
+            # Postgres 18 stores data in a major-version subdir and wants the mount
+            # at /var/lib/postgresql (NOT .../data, which 18 rejects). Mirrors the
+            # compose volume note. See docker-library/postgres#37.
+            - name: data
+              mountPath: /var/lib/postgresql
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: timeline-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: timeline-postgres
+  labels:
+    app: timeline-postgres
+spec:
+  selector:
+    app: timeline-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

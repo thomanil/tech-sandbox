@@ -1,0 +1,32 @@
+# Argo CD Application — LOCAL minikube cluster.
+# Tells the Argo CD running in minikube to keep timeline-server matching
+# k8s/timeline-server/overlays/local at main. Per PLAN.md #1, local does NOT run
+# image-automation: it deploys a locally-built image (imagePullPolicy: Never),
+# so there's nothing to auto-bump and no race with the upcloud cluster's commits.
+#
+# The local overlay also bundles the in-cluster Postgres (PVC + Deployment +
+# Service) and the wait-for-db init container, so Argo manages the whole local
+# stack's desired state. The IMAGE itself is still supplied locally (built into
+# minikube by scripts/deploy-minikube.sh), not pulled — minikube has no registry
+# pull and no LoadBalancer (see PLAN.md #2).
+#
+# Apply once:
+#   kubectl --context minikube apply -f k8s/argocd/application-local.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: timeline-server
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/thomanil/tech-sandbox.git
+    targetRevision: main
+    path: k8s/timeline-server/overlays/local
+  destination:
+    server: https://kubernetes.default.svc   # the minikube cluster Argo runs in
+    namespace: default                        # same namespace the push manifests used
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

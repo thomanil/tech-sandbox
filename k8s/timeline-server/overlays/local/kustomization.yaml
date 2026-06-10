@@ -1,0 +1,87 @@
+# LOCAL overlay (minikube). Reproduces the effective output of the legacy
+# k8s/timeline-server-local.yaml. Captures ONLY what made it differ from the
+# shared base:
+#   - image is built straight into minikube, never pulled  -> timeline-server:latest + imagePullPolicy: Never
+#   - reaches an IN-CLUSTER Postgres (bundled here)         -> DATABASE_URL + postgres.yaml + wait-for-db init
+#   - CPU limit bumped to "2" to avoid CFS throttling under nested virtualization
+#   - exposed via NodePort 30080 (the desktop client's fixed port)
+# Everything else (replicas:1, Recreate, split probes, requests, securityContext)
+# is inherited from ../../base unchanged.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - postgres.yaml
+
+# Swap the server image to the locally-built one (no registry, never pulled).
+images:
+  - name: ghcr.io/thomanil/timeline-server
+    newName: timeline-server
+    newTag: latest
+
+patches:
+  # Deployment: local-only container differences, all merged onto the base.
+  #   - imagePullPolicy: Never (the image only exists inside minikube; the
+  #     default Always would ImagePullBackOff on a :latest tag)
+  #   - DATABASE_URL -> the in-cluster timeline-postgres Service (NOT the host's
+  #     compose DB over host.minikube.internal; that host hop stalled the event
+  #     loop ~190ms/send — see postgres.yaml). Cleartext throwaway dev creds,
+  #     sslmode=disable (local container does no TLS).
+  #   - resources.limits.cpu: "2" — the minikube node runs as a Docker container
+  #     inside an aarch64 VM nested on a Mac; under that double virtualization the
+  #     tiny per-tick work overruns a 250m CFS budget and the event loop is
+  #     throttled in ~2/3 of periods, so playback visibly crawls. A roomier limit
+  #     keeps the 5/s timer wakeups on time. Local-only, so the headroom is free.
+  #   - wait-for-db init container: the server runs migrations on boot and dies if
+  #     the DB is unreachable, so a cold deploy (DB + server applied together)
+  #     would CrashLoop until Postgres wins the race. pg_isready ships in postgres:18.
+  - target:
+      kind: Deployment
+      name: timeline-server
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: timeline-server
+      spec:
+        template:
+          spec:
+            initContainers:
+              - name: wait-for-db
+                image: postgres:18
+                command:
+                  - sh
+                  - -c
+                  - |
+                    until pg_isready -h timeline-postgres -U timeline -d timeline; do
+                      echo "waiting for timeline-postgres..."; sleep 2
+                    done
+            containers:
+              - name: timeline-server
+                imagePullPolicy: Never
+                resources:
+                  limits:
+                    cpu: "2"
+  # DATABASE_URL appended (not strategic-merged) so it lands AFTER HOST, matching
+  # the legacy env order exactly. In-cluster timeline-postgres, cleartext dev creds.
+  - target:
+      kind: Deployment
+      name: timeline-server
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: DATABASE_URL
+          value: "postgresql://timeline:timeline@timeline-postgres:5432/timeline?sslmode=disable"
+
+  # Service: expose via NodePort on the fixed 30080 the desktop client expects.
+  - target:
+      kind: Service
+      name: timeline-server
+    patch: |
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080
