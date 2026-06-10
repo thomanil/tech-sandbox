@@ -122,6 +122,21 @@ back to push:
    pre-cutover build (retag by hand if you need it sooner).
 5. Run the restored `scripts/deploy-upcloud.sh` once to confirm push deploys work.
 
+**Why doesn't reverting `main` remove Argo on its own?** Because Git is the
+desired-state source Argo *reads* — it is not what installs or owns Argo. Two
+things live in the cluster that the repo does not control: (a) **Argo CD + Image
+Updater themselves**, installed out-of-band during bootstrap (`kubectl apply` of
+their install manifests, which are NOT in this repo) — git never installed them,
+so git can't uninstall them; and (b) the **`Application` object**, applied by hand
+once — deleting `application-upcloud.yaml` from the repo does NOT delete the live
+object, because nothing reconciles the Applications themselves (we deliberately
+skipped app-of-apps, decision #4). After a revert the orphaned Application just
+points at a now-deleted path and parks in a permanent `ComparisonError`, while
+Image Updater keeps polling and failing — a broken, lingering control plane rather
+than a clean teardown. This is GitOps's bootstrapping asymmetry: the puller is
+placed in the cluster out-of-band, so it is torn down out-of-band too (the two
+`kubectl delete`s in step 3).
+
 Because the overlays render identical to the old flat manifests and both modes
 deploy into the **same `default` namespace**, flipping push↔pull is a control-plane
 ownership change, not a workload change — the pod/Service spec doesn't churn, and
