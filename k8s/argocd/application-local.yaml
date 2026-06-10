@@ -25,10 +25,8 @@ spec:
     path: k8s/timeline-server/overlays/local
   destination:
     server: https://kubernetes.default.svc   # the minikube cluster Argo runs in
-    namespace: timeline
+    namespace: default                        # same namespace the push manifests used
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
-    syncOptions:
-      - CreateNamespace=true

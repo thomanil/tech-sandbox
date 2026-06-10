@@ -12,8 +12,8 @@
 # reloads client state from timeline.client_state on startup, so clients resume
 # where they left off; without a DB, state resets.
 #
-# Like logs-upcloud.sh / deploy-upcloud.sh, every kubectl call is pinned to the
-# UpCloud kubeconfig via KUBECONFIG, so this never bounces whatever your default
+# Like logs-upcloud.sh, every kubectl call is pinned to the UpCloud kubeconfig
+# via KUBECONFIG, so this never bounces whatever your default
 # kubectl context happens to be (e.g. a local minikube). It honors an already-set
 # KUBECONFIG and otherwise falls back to the local out-of-repo copy. It also
 # asserts the expected cluster context before doing anything.

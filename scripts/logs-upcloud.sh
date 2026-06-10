@@ -6,17 +6,17 @@
 # (connects, playback commands) to stdout, which the container captures, so this
 # streams the roster tables as they happen on the live public cluster.
 #
-# Like deploy-upcloud.sh, every kubectl call is pinned to the UpCloud kubeconfig
-# via KUBECONFIG, so this never tails whatever your default kubectl context
-# happens to be (e.g. a local minikube). It honors an already-set KUBECONFIG and
-# otherwise falls back to the local out-of-repo copy. It also asserts the
-# expected cluster context before streaming.
+# Every kubectl call is pinned to the UpCloud kubeconfig via KUBECONFIG, so this
+# never tails whatever your default kubectl context happens to be (e.g. a local
+# minikube). It honors an already-set KUBECONFIG and otherwise falls back to the
+# local out-of-repo copy. It also asserts the expected cluster context before
+# streaming.
 #
-# Caveat: a follow is bound to a single pod. A deploy (deploy-upcloud.sh, or the
-# CI auto-rollout on a push to main) does a rollout that replaces the pod
-# (Recreate strategy), which ends the stream — just run this again once the new
-# pod is ready. The old pod's logs are gone with it; use the same command with
-# --previous to see the last terminated pod's output.
+# Caveat: a follow is bound to a single pod. A new deploy (Argo CD syncing a new
+# image after Image Updater bumps it, or a manual upcloud-restart-pods.sh) does a
+# rollout that replaces the pod (Recreate strategy), which ends the stream — just
+# run this again once the new pod is ready. The old pod's logs are gone with it;
+# use the same command with --previous to see the last terminated pod's output.
 set -euo pipefail
 
 # Run from the repo root regardless of where the script is invoked from.

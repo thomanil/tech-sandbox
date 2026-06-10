@@ -1,138 +1,118 @@
-# Timeline-server GitOps migration — PLAN & OPEN QUESTIONS
+# Timeline-server GitOps — DESIGN, DECISIONS & BOOTSTRAP
 
-Status: **work-in-progress scaffold.** This branch adds a Kustomize base/overlays
-layout, two Argo CD `Application` manifests (local + upcloud), and helper scripts
-to open each cluster's Argo UI. It does **not** yet flip the live deploy path from
-push (CI runs `deploy-upcloud.sh`) to pull (Argo syncs from Git). The open
-questions below must be answered before that switch.
+Status: **cutover implemented in the repo; pending one-time cluster bootstrap.**
 
-The base/overlays **faithfully reproduce** the three legacy `k8s/timeline-server-*.yaml`
-manifests — verified by rendering each overlay with `kustomize build` and
-deep-diffing against the legacy file (see "Verification" at the bottom). The
-legacy files are left in place and remain the live deploy targets until the pull
-path is proven.
+The UpCloud deploy path has been flipped from **push** (CI ran `deploy-upcloud.sh`)
+to **pull** (Argo CD syncs Git). All repo-side changes are done; the only thing
+left is the one-time, in-cluster bootstrap (install Argo CD + Image Updater,
+create the write credential, apply the `Application`) — see the runbook below.
+Until that bootstrap runs in the live cluster, nothing auto-deploys.
 
-Context discovered from the existing repo:
-- CI (`.github/workflows/build-image.yml`) **already pushes an immutable SHA tag**
-  (`type=sha,format=long`) alongside `:latest`. So SHA tags already exist in GHCR.
-- Current CD is **push**: the `deploy-upcloud` job runs `scripts/deploy-upcloud.sh`,
-  which `kubectl apply`s the manifest and forces a rollout. Migrating to pull means
-  this job goes away (or is reduced to "build + push only").
-- The manifests currently reference `:latest`, not the SHA — so even though SHA
-  tags exist, nothing pins or traces the running version yet.
+## Decisions (resolved)
 
-## Layout added by this branch
+| # | Question | Decision |
+|---|----------|----------|
+| 1 | Image-automation scope | **Only upcloud** automates; local deploys a locally-built image |
+| 6 | Automation tool | **Argo CD Image Updater** (git write-back) |
+| 8 | Secrets under GitOps | **Keep out-of-band** (`timeline-db` + TLS bundle stay manual; add `git-creds`) |
+| 2 | Exposure | **Keep the split** — NodePort 30080 local / LoadBalancer + TLS upcloud |
+| 3 | Namespace | **`default`** (parity with the old push manifests) |
+| 7 | `:latest` tag | **Dropped** — CI publishes only immutable `sha-<commit>` |
+
+## What runs where
 
 ```
-k8s/timeline-server/base/                 # shared Deployment + Service (every-env invariants)
-k8s/timeline-server/overlays/local/       # minikube: local image (Never) + bundled in-cluster Postgres + cpu "2" + NodePort 30080
-k8s/timeline-server/overlays/published/   # minikube TEST path: GHCR image (IfNotPresent) + host.minikube.internal DB + NodePort 30080
-k8s/timeline-server/overlays/upcloud/     # prod: GHCR image (Always) + timeline-db Secret + LoadBalancer 80/443 + pinned TLS bundle
-k8s/argocd/application-local.yaml         # Argo Application -> overlays/local   (no image-automation)
-k8s/argocd/application-upcloud.yaml       # Argo Application -> overlays/upcloud (gets image-automation)
+k8s/timeline-server/base/                 # every-environment invariants (replicas:1+Recreate, split /readyz+/healthz probes, non-root, resource floors)
+k8s/timeline-server/overlays/local/       # minikube: locally-built image (Never) + bundled in-cluster Postgres + cpu "2" + NodePort 30080
+k8s/timeline-server/overlays/published/   # minikube TEST of the GHCR image (IfNotPresent) + host.minikube.internal DB + NodePort 30080
+k8s/timeline-server/overlays/upcloud/     # prod: GHCR image by sha (Always) + timeline-db Secret + LoadBalancer 80/443 + pinned TLS bundle
+k8s/argocd/application-local.yaml         # Argo Application -> overlays/local   (NO image-automation), namespace default
+k8s/argocd/application-upcloud.yaml       # Argo Application -> overlays/upcloud (Image Updater annotations), namespace default
 scripts/argo-web-console-local.sh         # port-forward + open Argo UI (minikube)
 scripts/argo-web-console-upcloud.sh       # port-forward + open Argo UI (upcloud)
 ```
 
-Note: `published` is the manual test path (`test-latest-main-image-on-minikube.sh`),
-not an Argo-managed environment, so it intentionally has **no Argo Application**.
+The three legacy `k8s/timeline-server-*.yaml` and `scripts/deploy-upcloud.sh` are
+**deleted** (superseded by the overlays + Argo). `deploy-minikube.sh` and
+`test-latest-main-image-on-minikube.sh` now `apply -k` the overlays.
+
+## The deploy loop (upcloud)
+
+```
+merge to main
+  → CI (build-image.yml) builds & pushes ghcr.io/thomanil/timeline-server:sha-<commit>   (no :latest)
+  → Argo CD Image Updater sees the newest sha-* build, commits the newTag bump
+    into overlays/upcloud/kustomization.yaml on main
+  → Argo CD syncs the overlay (selfHeal + prune) and rolls the single pod
+```
+
+`overlays/upcloud/kustomization.yaml`'s `images[].newTag` is the **single source of
+truth for the deployed commit**. To pin/rollback by hand, edit that line to a
+specific `sha-<commit>` and push; Argo deploys it. (Image Updater will resume
+bumping from the newest build after that.)
 
 ---
 
-## Open questions (blockers / decisions before going live)
+## Bootstrap runbook (one-time, per cluster)
 
-### 1. Two clusters writing to the same Git path (THE BIG ONE)
-If both minikube's Argo and upcloud's Argo run image-automation against the same
-overlay/image/policy, they race to commit tag bumps to `main` and deploy each
-other's builds.
-**Proposed default:** only **upcloud** runs image-automation (it tracks real CI
-builds from GHCR). **local** minikube deploys a locally-built image (no registry,
-no automation), matching the original `timeline-server-local.yaml` behaviour.
-- [ ] Confirm: local does NOT auto-update from GHCR. (If it must, give the two
-      clusters separate tag streams / policies / paths so commits never collide.)
+These are operational steps run against the live cluster — not in this repo.
 
-### 2. minikube cannot provision a LoadBalancer
-The upcloud overlay uses `type: LoadBalancer` + the UpCloud LB-config annotation;
-on minikube that Service stays `<pending>` forever. This is WHY the local overlay
-uses NodePort 30080. Exposure is the one thing that legitimately differs between
-the clusters — do not "unify" it.
-- [ ] Confirm NodePort-local / LoadBalancer-upcloud split is accepted as final.
+### UpCloud (production — the pull path)
+1. **Install Argo CD** into the `argocd` namespace:
+   `kubectl create namespace argocd && kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml`
+2. **Install Argo CD Image Updater** (separate component, see #6):
+   `kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/stable/manifests/install.yaml`
+3. **Create the `git-creds` write credential** in `argocd` (a deploy key/token
+   scoped to push this repo — Image Updater commits the tag bump with it):
+   `kubectl -n argocd create secret generic git-creds --from-literal=username=<user> --from-literal=password=<PAT-or-deploy-token>`
+   (or an SSH key per the Image Updater docs). This is the only NEW secret the
+   cutover adds.
+4. **Confirm the out-of-band secrets exist** (unchanged from before): the
+   `timeline-db` Secret in `default` (managed-Postgres `DATABASE_URL`, see
+   `docs/upcloud-postgres.md`) and the TLS certificate bundle referenced by UUID
+   in the upcloud overlay (see `docs/upcloud-custom-domain-tls.md`).
+5. **Apply the Application** (once):
+   `kubectl --context kubernetes-admin@tech-sandbox-upcloud-k8s-cluster apply -f k8s/argocd/application-upcloud.yaml`
+6. **Seed the image** (optional): the overlay ships a seed `newTag`. Image Updater
+   will bump it to the newest `sha-*` within a couple of minutes; or edit it by
+   hand to deploy a specific commit immediately.
+7. **GitHub cleanup:** the `deploy-upcloud` CI job is gone, so the
+   `UPCLOUD_KUBECONFIG` Actions secret is no longer used for deploys — remove it
+   when convenient (CI no longer needs cluster credentials).
+8. **First login:** open `scripts/argo-web-console-upcloud.sh`, change the admin
+   password, delete `argocd-initial-admin-secret`.
 
-### 3. Target namespace + auto-create
-Applications target namespace `timeline`. Argo must create it.
-- [ ] Confirm namespace name `timeline` is desired.
-- [x] `syncOptions: [CreateNamespace=true]` set in both Application manifests.
-
-### 4. Bootstrapping — who applies the Application objects?
-The Application YAMLs must be applied to each cluster once, by hand, against the
-right context. (App-of-apps is overkill for two clusters.)
-- [ ] `kubectl --context minikube apply -f k8s/argocd/application-local.yaml`
-- [ ] `kubectl --context kubernetes-admin@tech-sandbox-upcloud-k8s-cluster apply -f k8s/argocd/application-upcloud.yaml`
-
-### 5. Git write credentials for image-automation
-The automation controller COMMITS to this repo, so it needs push rights (deploy
-key or token) stored as a Secret in the upcloud cluster. Plain Argo sync only
-needs read access; automation needs write.
-- [ ] Create a write-scoped deploy key / token.
-- [ ] Store it as a Secret in the upcloud cluster's argocd namespace.
-
-### 6. Argo CD Image Updater is a SEPARATE install
-Plain Argo CD does not include image automation. Either install Argo CD Image
-Updater alongside Argo, OR use Flux's image-reflector/image-automation toolkit.
-The marker-comment / annotation syntax differs between the two — pick ONE. The
-`overlays/upcloud` image line carries a PLACEHOLDER marker comment today.
-- [ ] Decide: Argo CD Image Updater vs Flux image automation.
-- [ ] Install it in the upcloud cluster.
-- [ ] Adjust the image marker in overlays/upcloud to that tool's exact syntax.
-
-### 7. CI must point manifests at the SHA (mostly already done)
-CI already produces `:sha-<long>` tags. Remaining work: the GitOps flow must
-reference the SHA (not `:latest`) so Git names the exact running version, and
-something must bump that SHA into Git (the image-automation controller, per #6).
-- [x] CI emits immutable SHA tags (confirmed in build-image.yml).
-- [ ] Overlay/image-automation references the SHA tag, not `:latest`.
-- [ ] Decide whether to keep `:latest` as a convenience pointer (it's fine to).
-
-### 8. Secrets management (live today on upcloud)
-The upcloud overlay already references a Secret (`timeline-db`, the managed-Postgres
-`DATABASE_URL`) created out of band, and the LB cert is a pinned bundle UUID. Argo
-syncs the Deployment/Service but NOT those secrets — they must exist before sync or
-the pod won't start. "Don't commit secrets" collides with GitOps the moment you'd
-want the Secret itself in Git — solve with sealed-secrets or external-secrets, NOT
-plaintext in Git.
-- [ ] Decide how `timeline-db` is managed under GitOps (keep out-of-band, or adopt
-      sealed-secrets / external-secrets so it's reconciled too).
-
-### 9. argocd-server uses a self-signed cert
-The UI is HTTPS with a self-signed cert; the browser warns every time over the
-port-forward (8080/8081 -> 443). Expected; just accept it. The console scripts
-forward to 443 and open https://localhost:<port>.
-- [x] Scripts account for this (forward :443, open https). No fix needed.
-
-### 10. Two Argo instances = two admin passwords
-Each cluster's Argo generates its own `argocd-initial-admin-secret`. The two
-console scripts log into two independent Argo installs; no shared login/state.
-- [x] Scripts print each cluster's admin password on launch for convenience.
-- [ ] After first login on each: change admin password, delete the initial secret.
+### Minikube (local — optional, no automation)
+Argo on minikube is optional. The fast inner loop is still
+`scripts/deploy-minikube.sh` (builds into minikube + `apply -k overlays/local`,
+no Argo needed). If you DO want Argo locally: install Argo CD, then
+`kubectl --context minikube apply -f k8s/argocd/application-local.yaml`. It has no
+image-automation (decision #1), so you still build the image into minikube
+yourself; Argo just reconciles the Deployment/Service/Postgres.
 
 ---
 
-## Also still TODO (not in the original 1–10, but needed to finish)
-- [ ] Repoint the deploy/test scripts (`deploy-minikube.sh`,
-      `test-latest-main-image-on-minikube.sh`, `deploy-upcloud.sh`) at the overlays
-      (`kubectl apply -k k8s/timeline-server/overlays/<env>`), then delete the three
-      legacy `k8s/timeline-server-*.yaml` files — but only once the pull path is proven.
-- [ ] Decide the fate of the push CD job in build-image.yml: remove the
-      `deploy-upcloud` job, or reduce it to build-and-push-only so Argo owns deploys.
+## Operational notes / not-yet-done
+- [ ] Run the UpCloud bootstrap above (the cutover is inert until then).
+- [ ] After bootstrap, verify the loop end-to-end: push a trivial server change,
+      confirm CI pushes `sha-<commit>`, Image Updater commits the bump, Argo rolls.
+- [ ] Remove the unused `UPCLOUD_KUBECONFIG` Actions secret.
+- [x] CI publishes only immutable `sha-<commit>` tags (no `:latest`).
+- [x] `deploy-upcloud` CI job removed; CI ends at "image in GHCR".
+- [x] Legacy flat manifests + `deploy-upcloud.sh` deleted; scripts repointed to overlays.
+- Self-signed argocd-server cert: the console scripts forward `:443` and open
+  `https://localhost:<port>`; accept the browser warning (expected).
+- Each cluster's Argo has its own admin password (`argocd-initial-admin-secret`);
+  the console scripts print it on launch.
 
-## Verification (re-run after any edit to base/overlays)
+## Verification (overlays still reproduce the pre-cutover manifests)
+The base/overlays were validated to render resource-for-resource identical to the
+three (now-deleted) flat manifests via `kustomize build overlays/<env>`. Re-run
+after any edit to base/overlays:
 ```
-kustomize build k8s/timeline-server/overlays/local     # == k8s/timeline-server-local.yaml
-kustomize build k8s/timeline-server/overlays/published  # == k8s/timeline-server-published.yaml
-kustomize build k8s/timeline-server/overlays/upcloud    # == k8s/timeline-server-upcloud.yaml
+kubectl kustomize k8s/timeline-server/overlays/local
+kubectl kustomize k8s/timeline-server/overlays/published
+kubectl kustomize k8s/timeline-server/overlays/upcloud
 ```
-Each render is resource-for-resource identical to its legacy manifest. The only
-byte-level delta is a single trailing newline inside the upcloud LB-config
-annotation value (kustomize clips block-scalar trailing newlines); that value is
-parsed as JSON by UpCloud's cloud controller, where trailing whitespace is
-ignored, so the effective config is identical.
+(The upcloud overlay's image `newTag` is now an immutable `sha-<commit>` that Image
+Updater keeps current, rather than the old `:latest`.)

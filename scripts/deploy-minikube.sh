@@ -39,8 +39,12 @@ echo "Building timeline-server:latest into minikube..."
 minikube image build -t timeline-server:latest .
 
 # --- Apply manifests and roll out ------------------------------------------
+# Render the local Kustomize overlay (server with imagePullPolicy: Never + the
+# in-cluster Postgres + wait-for-db init + NodePort 30080) and apply it. This is
+# the same overlay Argo CD would sync on a minikube with Argo installed; applying
+# it by hand here keeps the fast no-Argo inner loop working.
 echo "Applying manifests..."
-kubectl apply -f k8s/timeline-server-local.yaml
+kubectl apply -k k8s/timeline-server/overlays/local
 
 # `kubectl apply` won't restart pods if the manifest text is unchanged, even
 # though we just rebuilt the :latest image. Force a new pod so the fresh image

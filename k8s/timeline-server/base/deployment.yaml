@@ -48,13 +48,15 @@ spec:
         runAsUser: 10001
       containers:
         - name: timeline-server
-          # Logical image name. Overlays select the concrete image: local swaps
-          # this to the locally-built `timeline-server:latest` (via the images
-          # transformer); published/upcloud keep this GHCR reference. The upcloud
-          # overlay is also where image-automation will rewrite the tag to a SHA.
-          # imagePullPolicy is intentionally NOT set here — each overlay sets its
-          # own (Never / IfNotPresent / Always).
-          image: ghcr.io/thomanil/timeline-server:latest
+          # Logical image reference, pinned to an immutable sha-<commit> tag (CI
+          # publishes only sha-* tags — there is no :latest). Overlays select the
+          # concrete image: local swaps this to the locally-built `timeline-server`
+          # (via the images transformer); upcloud pins its own sha that Argo CD
+          # Image Updater bumps; published has its sha injected by the test script.
+          # This base value is just a sane default — every overlay overrides the
+          # tag. imagePullPolicy is intentionally NOT set here; each overlay sets
+          # its own (Never / IfNotPresent / Always).
+          image: ghcr.io/thomanil/timeline-server:sha-2ced2cec4345bfb9ebd506732aab1c6c0dbbb156
           ports:
             - name: http
               containerPort: 8000

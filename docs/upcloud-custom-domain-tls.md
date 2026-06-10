@@ -3,9 +3,9 @@
 > **TL;DR**
 > 1. **DNS** — DNSimple **ALIAS** `tknilsson-sandbox.com` → `lb-…upcloudlb.com` (the LB hostname).
 > 2. **Cert** — create an UpCloud **dynamic** certificate bundle for the domain (auto-issued + auto-renewed, ZeroSSL DV). Copy its UUID.
-> 3. **Attach by UUID in the annotation** — put `certificate_bundle_uuid` in the `443` frontend's `tls_configs` in `k8s/timeline-server-upcloud.yaml`, then `./scripts/deploy-upcloud.sh`. **Never attach in the Hub** — the CCM overwrites manual attaches on *every* reconcile (verified: stripped in ~12s).
+> 3. **Attach by UUID in the annotation** — put `certificate_bundle_uuid` in the `443` frontend's `tls_configs` in `k8s/timeline-server/overlays/upcloud/kustomization.yaml`, commit to `main`, and let Argo CD sync. **Never attach in the Hub** — the CCM overwrites manual attaches on *every* reconcile (verified: stripped in ~12s).
 > 4. **Verify** — `openssl s_client -connect tknilsson-sandbox.com:443 -servername tknilsson-sandbox.com </dev/null 2>/dev/null | openssl x509 -noout -subject` → `CN=tknilsson-sandbox.com`.
-> 5. **On LB/cluster recreate** — the bundle UUID is new: re-point the ALIAS, recreate the bundle, update the UUID in the manifest, redeploy. That one-line UUID edit is the only recurring touch.
+> 5. **On LB/cluster recreate** — the bundle UUID is new: re-point the ALIAS, recreate the bundle, update the UUID in the overlay, commit (Argo syncs). That one-line UUID edit is the only recurring touch.
 >
 > Current bundle UUID: `0a1fe407-5173-4754-892b-afa6386c5a7f` (DNSimple-issued Let's Encrypt certs are **not** used by this setup).
 
@@ -23,8 +23,8 @@ Worked example uses the real values for this project:
 | DNS host         | DNSimple                                                      |
 | LB hostname      | `lb-0a473f0a3c4c4d3ba2adf3e8c27c2470-1.upcloudlb.com`         |
 | LB public IP     | `212.147.232.159`                                             |
-| Manifest         | `k8s/timeline-server-upcloud.yaml`                           |
-| Deploy           | `scripts/deploy-upcloud.sh`                                  |
+| Manifest         | `k8s/timeline-server/overlays/upcloud/kustomization.yaml`     |
+| Deploy           | commit to `main` → Argo CD syncs (no push script)            |
 
 Both `https://tknilsson-sandbox.com` (web client) and
 `wss://tknilsson-sandbox.com/ws` (WebSocket) ride the **same 443 `http`-mode
@@ -50,8 +50,8 @@ Service. From the UpCloud CCM docs:
 
 **This was verified empirically** (see Appendix): attaching the cert by hand in
 the Hub works *until the next reconcile*, then it's stripped. A reconcile is
-triggered by **any** Service update — every `deploy-upcloud.sh`, every rollout,
-periodic resync. In the test, a single throwaway annotation reverted the served
+triggered by **any** Service update — every Argo CD sync of the overlay, every
+rollout, periodic resync. In the test, a single throwaway annotation reverted the served
 cert from `tknilsson-sandbox.com` to the `upcloudlb.com` host within ~12 seconds.
 
 **Conclusion: never attach the domain cert by hand. Reference it in the
@@ -69,8 +69,10 @@ annotation by UUID** so the CCM keeps it attached.
 
   Apex → DNSimple **ALIAS** record → the LB hostname. Subdomain → **CNAME**.
 
-- Cluster reachable via the pinned kubeconfig (deploy script enforces context
-  `kubernetes-admin@tech-sandbox-upcloud-k8s-cluster`).
+- Cluster reachable via the pinned kubeconfig for any manual verification
+  (the remote helper scripts enforce context
+  `kubernetes-admin@tech-sandbox-upcloud-k8s-cluster`). The deploy itself is owned
+  by Argo CD syncing `main` — there is no push script.
 
 - Access to the UpCloud **Hub** (https://hub.upcloud.com) to create the dynamic
   bundle once and read its UUID.
@@ -95,8 +97,10 @@ The bundle is an UpCloud resource that *persists* across reconciles (only its
 
 ## Step 2 — Reference the bundle by UUID in the annotation
 
-Edit the Service annotation in `k8s/timeline-server-upcloud.yaml` to attach the
-bundle declaratively:
+Edit the Service annotation in the `upcloud` overlay
+(`k8s/timeline-server/overlays/upcloud/kustomization.yaml`) to attach the
+bundle declaratively. The annotation lives in the strategic-merge `Service` patch
+there — set the `certificate_bundle_uuid` in its `443` frontend's `tls_configs`:
 
 ```yaml
 metadata:
@@ -127,13 +131,13 @@ Notes:
   if you also want the LB-hostname cert; not required.)
 - Leave `spec.ports` (80→8000 and 443→8000) unchanged.
 
-## Step 3 — Deploy
+## Step 3 — Deploy (commit; Argo CD syncs)
 
-```bash
-./scripts/deploy-upcloud.sh
-```
-
-The CCM applies the annotation and attaches the bundle to the 443 frontend.
+Commit the overlay change to `main`. Argo CD reconciles the upcloud overlay and
+applies the updated `Service` annotation; the CCM then attaches the bundle to the
+443 frontend. (There is no push script — the deploy is git-driven. To force an
+immediate sync rather than waiting for the next reconcile, use the Argo CD web
+console: `./scripts/argo-web-console-upcloud.sh`.)
 
 ## Step 4 — Verify, then prove it's durable
 
@@ -191,9 +195,10 @@ The recurring steps are:
 2. **Bundle:** create the dynamic bundle for `tknilsson-sandbox.com` on the new
    LB (Step 1) and copy the **new UUID**.
 3. **Annotation:** update `certificate_bundle_uuid` in
-   `k8s/timeline-server-upcloud.yaml` to the new UUID, then `deploy-upcloud.sh`.
+   `k8s/timeline-server/overlays/upcloud/kustomization.yaml` to the new UUID, then
+   commit to `main` and let Argo CD sync.
 
-This is the *only* recurring manual touch, and it's a one-line manifest edit
+This is the *only* recurring manual touch, and it's a one-line overlay edit
 committed to git — not Hub clicking. Routine updates/deploys in between need
 nothing, because the cert is declared in the annotation.
 

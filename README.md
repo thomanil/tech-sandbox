@@ -233,10 +233,12 @@ flowchart TB
 
 The same container is now the unit of a real Kubernetes deployment, run locally
 on [minikube](https://minikube.sigs.k8s.io/) so manifests can be iterated on
-quickly. `k8s/timeline-server-local.yaml` holds a `Deployment` running the
+quickly. The `k8s/timeline-server/overlays/local` Kustomize overlay (over the
+shared `k8s/timeline-server/base`) holds a `Deployment` running the
 `timeline-server` image and a `Service` fronting port 8000, with liveness /
 readiness probes wired to `GET /healthz` — the same endpoint the compose
-healthcheck uses.
+healthcheck uses. (The Kustomize base/overlays split itself arrives in the
+ninth iteration; early on this was a single flat `k8s/timeline-server-local.yaml`.)
 
 The `Deployment` is a **single replica** with a `Recreate` strategy: state is
 in-memory and per-process (one ticker drives all clients), so it must never
@@ -282,7 +284,7 @@ terminated pod instead: `kubectl logs deployment/timeline-server --previous`.
 Teardown:
 
 ```
-kubectl delete -f k8s/timeline-server-local.yaml   # remove the app, keep the cluster
+kubectl delete -k k8s/timeline-server/overlays/local   # remove the app, keep the cluster
 minikube stop                                # stop the cluster, keep its state
 minikube delete                              # nuke the cluster entirely
 ```
@@ -325,9 +327,10 @@ builds it straight into minikube from the working tree. This iteration publishes
 it. A GitHub Actions workflow (`.github/workflows/build-image.yml`) builds the
 server image on every push to `main` (that touches the server, Dockerfile, or
 `.dockerignore`) and pushes a **multi-arch** (`amd64` + `arm64`) image to GitHub
-Container Registry as `ghcr.io/thomanil/timeline-server`, tagged `:latest` plus
-an immutable `:sha-…`. The build uses the same `Dockerfile`, so CI and local
-produce the same artifact — CI just shares it.
+Container Registry as `ghcr.io/thomanil/timeline-server`, tagged with an
+immutable `sha-<commit>` (the long git SHA — there is no mutable `:latest`; see
+the ninth iteration for why). The build uses the same `Dockerfile`, so CI and
+local produce the same artifact — CI just shares it.
 
 A new script pulls that published image back down and runs it on minikube, as an
 end-to-end test of the real artifact (not local source):
@@ -336,14 +339,16 @@ end-to-end test of the real artifact (not local source):
 ./scripts/test-latest-main-image-on-minikube.sh
 ```
 
-It pre-pulls `ghcr.io/thomanil/timeline-server:latest` into minikube (failing
-fast with a clear message if the package is missing or still private), applies
-`k8s/timeline-server-published.yaml`, forces a rollout, waits for readiness, and
-prints the same `ws://<minikube-ip>:30080/ws` URL. The published manifest reuses
+It resolves a commit to test (the tip of `origin/main` by default, or a git
+ref/SHA you pass as `$1`), pre-pulls that `ghcr.io/thomanil/timeline-server:sha-<commit>`
+into minikube (failing fast with a clear message if that build is missing or the
+package is private), renders the `k8s/timeline-server/overlays/published` overlay
+with the image pinned to that SHA, forces a rollout, waits for readiness, and
+prints the same `ws://<minikube-ip>:30080/ws` URL. The published overlay reuses
 the same `Deployment`/`Service` names and NodePort as the local one — only the
-`image` (GHCR instead of `timeline-server:latest`) and `imagePullPolicy`
-(`IfNotPresent`, since the script pre-pulls) differ — so the client's **Local
-minikube** dropdown entry works unchanged for either path.
+`image` (GHCR instead of the locally-built `timeline-server:latest`) and
+`imagePullPolicy` (`IfNotPresent`, since the script pre-pulls) differ — so the
+client's **Local minikube** dropdown entry works unchanged for either path.
 
 ```mermaid
 flowchart TB
@@ -352,11 +357,11 @@ flowchart TB
     subgraph actions["GitHub Actions"]
       build["build-image.yml<br/>(docker buildx: amd64 + arm64)"]
     end
-    ghcr["ghcr.io/thomanil/timeline-server:latest<br/>(public OCI image)"]
+    ghcr["ghcr.io/thomanil/timeline-server:sha-&lt;commit&gt;<br/>(public OCI image)"]
   end
 
   subgraph dev2["💻 Developer Workstation"]
-    script["test-latest-main-image-on-minikube.sh<br/>(minikube image pull + apply + rollout)"]
+    script["test-latest-main-image-on-minikube.sh<br/>(minikube image pull + apply -k + rollout)"]
     subgraph minikube["☸️ minikube cluster (docker driver)"]
       pod["Pod timeline-server<br/>(NodePort 30080 → 8000)"]
     end
@@ -374,18 +379,21 @@ flowchart TB
 
 With the image published to GHCR and pull-tested on minikube (above), this
 iteration runs it for real: a public deployment on **UpCloud Managed
-Kubernetes**, pulling the exact same `ghcr.io/thomanil/timeline-server:latest`
-that CI builds on every push to `main`. Nothing is built or pushed from a
-developer machine — UpCloud pulls the published artifact straight from GHCR (it
-can, because the package is public), so `main` is the single source of truth for
-what runs remotely.
+Kubernetes**, pulling the exact same image CI builds on every push to `main`.
+Nothing is built or pushed from a developer machine — UpCloud pulls the published
+artifact straight from GHCR (it can, because the package is public), so `main` is
+the single source of truth for what runs remotely.
 
-Deploy with `./scripts/deploy-upcloud.sh` (or automatically via CI on every merge
-to `main`). The `Service` is a `LoadBalancer` with a stable public hostname, TLS
-terminated at the LB on a custom domain (`wss://tknilsson-sandbox.com/ws`),
-single-replica/`Recreate` like the minikube siblings. Each auto-rollout restarts
-the single in-memory-stateful pod, so clients drop and state resets on every
-deployed push.
+This iteration deployed via **push**: a `./scripts/deploy-upcloud.sh` that ran
+`kubectl apply` + a forced rollout, fired automatically by a `deploy-upcloud` CI
+job on every merge to `main` (and runnable by hand). **The ninth iteration
+replaces this with pull-based GitOps** — that script and CI job have since been
+removed, so the mechanism below is the historical push snapshot; the infra it
+stands up (LB, TLS, single replica) is unchanged. The `Service` is a
+`LoadBalancer` with a stable public hostname, TLS terminated at the LB on a custom
+domain (`wss://tknilsson-sandbox.com/ws`), single-replica/`Recreate` like the
+minikube siblings. Each rollout restarts the single in-memory-stateful pod, so
+clients drop and state resets on every deployed push.
 
 To bounce the running pod without pushing a new image — to clear in-memory state,
 pick up a Secret/ConfigMap change, or recover a wedged pod — use
@@ -395,8 +403,9 @@ state-resetting interruption as a deploy). Follow its logs with
 
 Detail lives in [`docs/`](docs/) ([map](docs/README.md)):
 
-- **[`upcloud-deployment.md`](docs/upcloud-deployment.md)** — the deploy script,
-  kubeconfig handling, manifest differences, and the CI continuous-deployment wiring.
+- **[`upcloud-deployment.md`](docs/upcloud-deployment.md)** — kubeconfig handling,
+  manifest/overlay differences, and how deployment works (now GitOps/pull — see
+  the ninth iteration).
 - **[`upcloud-create-cluster.md`](docs/upcloud-create-cluster.md)** — standing up or
   recreating the ephemeral cluster from scratch.
 - **[`upcloud-custom-domain-tls.md`](docs/upcloud-custom-domain-tls.md)** — the custom
@@ -562,6 +571,85 @@ flowchart TB
     secret -->|"valueFrom secretKeyRef"| usrv
     usrv -->|"DATABASE_URL<br/>sslmode=require"| upg
   end
+```
+
+### (Ninth iteration) GitOps: pull-based deploys with Argo CD + Kustomize
+
+The sixth iteration deployed by **push** — CI ran `deploy-upcloud.sh`, which
+`kubectl apply`ed a manifest and forced a rollout. That works, but it means CI
+holds cluster-admin credentials, the cluster's actual state is whatever the last
+`apply` happened to do, and "what's running" lives only in the cluster. This
+iteration inverts it to **pull**: the cluster continuously reconciles itself to
+Git, and CI never touches it.
+
+Two pieces make that happen:
+
+- **Kustomize base + overlays.** The three flat `k8s/timeline-server-*.yaml`
+  files are refactored into one `k8s/timeline-server/base` (every-environment
+  invariants — single replica, `Recreate`, split `/readyz` + `/healthz` probes,
+  non-root, resource floors) plus thin `overlays/{local,published,upcloud}` that
+  patch only what differs (image + pull policy, the bundled local Postgres, and
+  how the `Service` is exposed). Rendering an overlay reproduces exactly what the
+  old flat file deployed.
+- **Argo CD + Argo CD Image Updater.** Argo CD runs *in* the UpCloud cluster and
+  syncs `overlays/upcloud` from `main` (an `Application` in `k8s/argocd/`, with
+  `selfHeal` + `prune` so manual drift is reverted). Argo CD Image Updater watches
+  GHCR for the newest immutable `sha-<commit>` build and **commits the tag bump
+  into `overlays/upcloud/kustomization.yaml`**, which Argo then rolls out. So Git
+  always names the live commit — the `newTag` in that overlay *is* the deployed
+  version.
+
+That's why CI now publishes **only** `sha-<commit>` tags and no `:latest`: under
+GitOps the running version must be named immutably in Git, not pinned to a moving
+tag. The full deploy loop on a merge to `main`:
+
+> CI builds & pushes `ghcr.io/…:sha-<commit>` → Image Updater sees it, commits the
+> `newTag` bump to `main` → Argo CD syncs the overlay → the single pod rolls.
+
+`main` stays the single source of truth, but now the cluster *pulls* it instead of
+CI *pushing* — CI's job ends at "image in GHCR", and no GitHub-held kubeconfig
+deploys anything. Exposure stays the one real per-cluster difference: `local`
+minikube uses NodePort 30080 (no cloud LB), `upcloud` keeps the `LoadBalancer` +
+custom-domain TLS from the sixth iteration. The `timeline-db` Postgres Secret and
+the TLS cert bundle remain created out of band; a new write-scoped `git-creds`
+Secret in the cluster lets Image Updater commit back. Open the live Argo UI with
+`./scripts/argo-web-console-upcloud.sh` (or `-local.sh`).
+
+The remaining decisions, the exact Image Updater annotations, and the one-time
+**bootstrap runbook** (install Argo CD + Image Updater, create `git-creds`, apply
+the `Application`s) live in [`k8s/GITOPS_PLAN.md`](k8s/GITOPS_PLAN.md).
+
+```mermaid
+flowchart TB
+  subgraph gh["☁️ GitHub"]
+    repo["push to main"]
+    subgraph actions["GitHub Actions"]
+      build["build-and-push job<br/>(docker buildx: amd64 + arm64)<br/>NO deploy job"]
+    end
+    ghcr["ghcr.io/thomanil/timeline-server:sha-&lt;commit&gt;<br/>(immutable, public OCI image)"]
+    git[("main<br/>overlays/upcloud/kustomization.yaml<br/>newTag: sha-&lt;commit&gt;")]
+  end
+
+  subgraph upcloud["☁️ UpCloud Managed Kubernetes"]
+    subgraph argons["Argo CD (argocd namespace)"]
+      argo["argocd-application-controller<br/>(syncs overlays/upcloud ← main)"]
+      updater["argo-cd-image-updater<br/>(watches GHCR, commits newTag bump)"]
+    end
+    lb["LoadBalancer Service<br/>(public host :443 TLS / :80 → 8000)"]
+    pod["Pod timeline-server<br/>(single replica, Recreate)"]
+  end
+
+  client["timeline_client.py / web client<br/>(UpCloud → wss://&lt;host&gt;/ws)"]
+
+  repo -->|triggers| build
+  build -->|push| ghcr
+  ghcr -.->|"poll for newest sha-*"| updater
+  updater -->|"git commit newTag"| git
+  git -->|sync desired state| argo
+  argo -->|apply / rollout| pod
+  ghcr -.->|kubelet pull| pod
+  client <-->|"&laquo;WebSocket&raquo;"| lb
+  lb -->|routes to| pod
 ```
 
 ### Next steps

@@ -15,9 +15,10 @@ The public deployment runs on UpCloud Managed Kubernetes. For a newcomer, read i
 this order:
 
 1. **[upcloud-deployment.md](upcloud-deployment.md)** — what the remote deployment
-   *is* and how a deploy works: the `deploy-upcloud.sh` script, the kubeconfig, how
-   the manifest differs from the minikube one, and the CI auto-deploy on merge to
-   `main`.
+   *is* and how a deploy works: the pull-based GitOps flow (Argo CD + Argo CD Image
+   Updater + Kustomize overlays), the kubeconfig, how the upcloud overlay differs
+   from the minikube ones, and the auto-rollout on merge to `main` (CI pushes a
+   `sha-<commit>` image → Image Updater bumps the tag in git → Argo syncs).
 2. **[upcloud-create-cluster.md](upcloud-create-cluster.md)** — how to stand up (or
    recreate) the ephemeral cluster from scratch.
 3. **[upcloud-custom-domain-tls.md](upcloud-custom-domain-tls.md)** — point the

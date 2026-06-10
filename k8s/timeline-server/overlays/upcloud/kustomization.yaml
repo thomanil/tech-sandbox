@@ -14,16 +14,17 @@ kind: Kustomization
 resources:
   - ../../base
 
-# The image the GitOps image-automation controller will rewrite on each new CI
-# build. CI already publishes an immutable `sha-<long>` tag alongside :latest
-# (docker/metadata-action type=sha,format=long — see .github/workflows/build-image.yml).
-# The marker comment is what the automation tool keys on to know which line to
-# bump; its EXACT syntax depends on Argo CD Image Updater vs Flux (PLAN.md #6 —
-# placeholder). Seed is :latest so the manifest is valid before automation is
-# wired up; the first run replaces it with sha-<commit>.
+# The running version is named HERE, by an immutable sha-<commit> tag. CI publishes
+# only sha-* tags (docker/metadata-action type=sha,format=long — see
+# .github/workflows/build-image.yml). Argo CD Image Updater (configured via the
+# annotations on k8s/argocd/application-upcloud.yaml) watches GHCR for the newest
+# sha-* build and commits the bump to THIS newTag (write-back-target: kustomization),
+# after which Argo rolls it out. So this line is the single source of truth for the
+# deployed commit; the value below is just the current seed — Image Updater keeps it
+# current. Update it by hand only to pin/rollback to a specific commit.
 images:
   - name: ghcr.io/thomanil/timeline-server
-    newTag: latest # {"$imagepolicy": "timeline-server:timeline-server:tag"}  # TODO(PLAN #6): set to chosen tool's syntax; becomes sha-<commit>
+    newTag: sha-2ced2cec4345bfb9ebd506732aab1c6c0dbbb156
 
 patches:
   # Deployment: always pull the freshest image, and source DATABASE_URL from the

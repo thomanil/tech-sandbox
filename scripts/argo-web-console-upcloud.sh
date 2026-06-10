@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Open the Argo CD web console for the UPCLOUD cluster.
 #
-# Same behaviour as the local script, but targets the UpCloud cluster. It reuses
-# the SAME kubeconfig deploy-upcloud.sh uses — which lives OUTSIDE the repo (the
-# repo's .gitignore blocks *kubeconfig*.yaml, so a cluster-admin kubeconfig is
-# never committed):
+# Same behaviour as the local script, but targets the UpCloud cluster. It uses
+# the UpCloud cluster kubeconfig kept OUTSIDE the repo (the repo's .gitignore
+# blocks *kubeconfig*.yaml, so a cluster-admin kubeconfig is never committed):
 #
 #   ~/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml
 #
@@ -16,13 +15,13 @@
 set -euo pipefail
 
 # --- config ---------------------------------------------------------------
-# Default to the out-of-repo UpCloud kubeconfig (same one deploy-upcloud.sh uses).
-# Honor an already-exported KUBECONFIG first.
+# Default to the out-of-repo UpCloud kubeconfig (the cluster-admin one kept in
+# ~/.secrets). Honor an already-exported KUBECONFIG first.
 DEFAULT_KUBECONFIG_FILE="$HOME/.secrets/tech-sandbox-upcloud-k8s-cluster_kubeconfig.yaml"
 export KUBECONFIG="${KUBECONFIG:-$DEFAULT_KUBECONFIG_FILE}"
 
-# Context: default to the UpCloud admin context deploy-upcloud.sh asserts; allow
-# override. Fall back to the kubeconfig's current-context if that name isn't present.
+# Context: default to the UpCloud admin context; allow override. Fall back to the
+# kubeconfig's current-context if that name isn't present.
 CONTEXT="${CONTEXT:-kubernetes-admin@tech-sandbox-upcloud-k8s-cluster}"
 NAMESPACE="argocd"
 LOCAL_PORT="8081"         # different port from the local script so both can run at once

@@ -18,6 +18,27 @@ kind: Application
 metadata:
   name: timeline-server
   namespace: argocd
+  # Argo CD Image Updater config (it reads these annotations off the Application).
+  # It watches GHCR for the newest immutable sha-* build and writes the bump back
+  # to Git, where Argo then syncs it — so Git always names the running commit.
+  #   - image-list: the alias `timeline` -> the GHCR repo to watch.
+  #   - update-strategy newest-build: pick the most recently BUILT image (sha tags
+  #     aren't semver-sortable, so sort by registry build time, not tag string).
+  #   - allow-tags: only consider sha-<40-hex> tags (ignore anything else).
+  #   - write-back-method git: COMMIT the change to the repo (not just patch the
+  #     live app). `:secret:argocd/git-creds` is the push credential Secret that
+  #     must exist in the argocd namespace (see GITOPS_PLAN.md #5 / the bootstrap
+  #     runbook) — a deploy key/token scoped to write this repo.
+  #   - write-back-target kustomization: edit overlays/upcloud/kustomization.yaml's
+  #     images[].newTag in place (the seed line there), so the manifest itself names
+  #     the version — rather than a separate .argocd-source-*.yaml override file.
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: timeline=ghcr.io/thomanil/timeline-server
+    argocd-image-updater.argoproj.io/timeline.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/timeline.allow-tags: regexp:^sha-[0-9a-f]{40}$
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/git-creds
+    argocd-image-updater.argoproj.io/write-back-target: kustomization
+    argocd-image-updater.argoproj.io/git-branch: main
 spec:
   project: default
   source:
@@ -26,10 +47,8 @@ spec:
     path: k8s/timeline-server/overlays/upcloud
   destination:
     server: https://kubernetes.default.svc   # the cluster Argo itself runs in
-    namespace: timeline
+    namespace: default                        # same namespace the push manifests used
   syncPolicy:
     automated:
       prune: true       # delete-from-Git => delete-from-cluster
       selfHeal: true    # revert manual kubectl edits back to Git
-    syncOptions:
-      - CreateNamespace=true

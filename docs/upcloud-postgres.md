@@ -6,7 +6,7 @@ cluster is (it is **not** a pod in the cluster). The server reaches it over TLS 
 applies any pending migrations on startup.
 
 > **Related:**
-> - Deploy mechanics (script, kubeconfig, CI) → [`upcloud-deployment.md`](upcloud-deployment.md).
+> - Deploy mechanics (Argo CD, Image Updater, kubeconfig) → [`upcloud-deployment.md`](upcloud-deployment.md).
 > - Recreating the cluster from scratch → [`upcloud-create-cluster.md`](upcloud-create-cluster.md).
 > - Migrations + the concurrency/locking story → [`../app/server-python/db/migrations/README.md`](../app/server-python/db/migrations/README.md).
 
@@ -43,10 +43,11 @@ on startup — the pod CrashLoops rather than serving on a missing schema.
 ## The `timeline-db` Secret
 
 The DSN carries the DB password, so it lives in a k8s Secret created out of band
-(like the kubeconfig and the TLS cert bundle), never in the repo. The Deployment
-references it via `secretKeyRef` (`k8s/timeline-server-upcloud.yaml`), so **the
-Secret must exist before the first deploy** or the pod stays in
-`CreateContainerConfigError`.
+(like the kubeconfig and the TLS cert bundle), never in the repo. The upcloud
+overlay's Deployment patch
+(`k8s/timeline-server/overlays/upcloud/kustomization.yaml`) references it via
+`secretKeyRef`, so **the Secret must exist before the first deploy** (before Argo
+CD first syncs) or the pod stays in `CreateContainerConfigError`.
 
 Create it (note `sslmode=require` — UpCloud enforces TLS):
 
